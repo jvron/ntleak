@@ -1,6 +1,9 @@
 #include <MinHook.h>
 #include <cstddef>
+#include <heapapi.h>
+#include <minwindef.h>
 #include <stdio.h>
+#include <winnt.h>
 
 #include "hooks.h"
 #include "tracker.h"
@@ -9,7 +12,8 @@
 
 void* (*pMallocOriginal)(size_t size) = NULL;
 void* (*pFreeOriginal)(void* ptr) = NULL;
-
+LPVOID (*pHeapAllocOriginal)(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) = NULL;
+BOOL (*pHeapFreeOriginal) (HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) = NULL;
 
 
 void* detourMalloc(size_t size)
@@ -32,6 +36,27 @@ void detourFree(void *ptr)
     pFreeOriginal(ptr);
 }
 
+LPVOID detourHeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes)
+{
+    void* memptr = pHeapAllocOriginal(hHeap, dwFlags, dwBytes);
+
+    if (memptr != NULL)
+    {
+        tracker.trackAlloc(dwBytes, memptr);
+    } 
+
+    return memptr;
+}
+
+BOOL detourHeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem)
+{
+    BOOL result = pHeapFreeOriginal(hHeap, dwFlags, lpMem);
+
+    tracker.trackFree(lpMem);
+
+    return result;
+}
+
 MH_STATUS disableHooks()
 {   
     MH_STATUS status;
@@ -46,6 +71,15 @@ MH_STATUS disableHooks()
     {
         return status;
     }
+
+    status = MH_DisableHook((void*)&HeapAlloc);
+    if (status != MH_OK)
+    {
+        return status;
+    }
+
+    status = MH_DisableHook((void*)&HeapFree);
+    if (status != MH_OK) return status;
 
     return status;
 }
@@ -82,6 +116,46 @@ MH_STATUS hookFree()
     }
 
     status = MH_EnableHook((void*)&free);
+    if (status != MH_OK)
+    {
+        return status;
+    }
+
+    return status;
+}
+
+MH_STATUS hookHeapAlloc()
+{
+    MH_STATUS status;
+
+    status = MH_CreateHook((void*)&HeapAlloc, (void*) &detourHeapAlloc, reinterpret_cast<LPVOID*>(&pHeapAllocOriginal));
+
+    if(status != MH_OK)
+    {
+        return status;
+    }
+
+    status = MH_EnableHook((void*)&HeapAlloc);
+    if (status != MH_OK)
+    {
+        return status;
+    }
+
+    return status;
+}
+
+MH_STATUS hookHeapFree()
+{
+    MH_STATUS status;
+
+    status = MH_CreateHook((void*)&HeapFree, (void*) &detourHeapFree, reinterpret_cast<LPVOID*>(&pHeapFreeOriginal));
+
+    if(status != MH_OK)
+    {
+        return status;
+    }
+
+    status = MH_EnableHook((void*)&HeapFree);
     if (status != MH_OK)
     {
         return status;

@@ -9,7 +9,7 @@
 #include "tracker.h"
 
 
-MemTracker tracker;
+MemTracker tracker; // global tracker variable definition
 
 void MemTracker::init()
 {   
@@ -35,11 +35,13 @@ void MemTracker::trackAlloc(size_t size, void* ptr)
 
 void MemTracker::trackFree(void *ptr)
 {
-    for (int i = 0; i < count; i++)
-    {
-        if(record[i].address == ptr)
+    for (int i = count - 1; i >= 0; i--)
+    {   
+        
+        if(record[i].address == ptr && record[i]. active == true) 
         {
             record[i].active = false;
+            return; //prevent making unfreed memory as freed if it has the same address
         }
     }
 }

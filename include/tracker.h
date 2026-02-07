@@ -23,12 +23,12 @@ public:
     void trackAlloc(size_t size, void* ptr);
     void trackFree(void* ptr);
     void report();
-    
+
     void shutdown();
 
 };
 
-//global tracker variable to be used in hook.cpp
+//global tracker variable delaration 
 //extern allows to share global varibles accross all translation units
 extern MemTracker tracker; 
 

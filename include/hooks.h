@@ -9,3 +9,5 @@ void detourFree(void* ptr);
 
 MH_STATUS hookMalloc();
 MH_STATUS hookFree();
+
+MH_STATUS disableHooks();

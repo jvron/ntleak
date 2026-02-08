@@ -12,8 +12,6 @@
 int main(void)
 {
 
-    //void* (*pMallocOriginal)(size_t size) = NULL;
-
     if (MH_Initialize() != MH_OK)
     {   
         std::cout << "Init faild\n";
@@ -22,17 +20,20 @@ int main(void)
     else {
         std::cout << "init success\n";
     }
-
+    
     tracker.init();
+    
 
     
     MH_STATUS status;
     status = hookHeapAlloc();
     status = hookHeapFree();
+
+    status = hookVirtualAlloc();
+    status = hookVirtualFree();
     
-    
-    status = hookMalloc();
-    status = hookFree();
+    //status = hookMalloc();
+    //status = hookFree();
     
     //testing
     int *pX = (int*) malloc(sizeof(int));
@@ -66,8 +67,6 @@ int main(void)
     
     tracker.report();
     tracker.shutdown();
-
-    
 
     return 0;
 }

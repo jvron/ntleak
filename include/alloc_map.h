@@ -53,6 +53,6 @@ public:
 
 private:
 
-    std::hash<void*> hash;
+    std::hash<void*> h;
 
 };

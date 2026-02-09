@@ -1,15 +1,36 @@
-#include "alloc_map.h"
-#include <iostream>
+#include <windows.h>
 #include <memoryapi.h>
+#include <iostream>
+#include "alloc_map.h"
+
 
 HashTable::HashTable()
 {
-    table = (AllocRecord*) VirtualAlloc(NULL, hashGroups * sizeof(AllocRecord), MEM_COMMIT, PAGE_READWRITE);
+    table = (AllocRecord*) VirtualAlloc(NULL, hashGroups * sizeof(AllocRecord), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+
+    if (table == nullptr)
+    {
+        std::cerr << "table alloc failed, error: " << GetLastError() << "\n";
+        table = nullptr;
+        return;
+    }
+
+    //init all records to zero
+    memset(table, 0, hashGroups * sizeof(AllocRecord));
+    
+   
 }
 
 HashTable::~HashTable()
-{
-    BOOL result = VirtualFree(table, 0, MEM_RELEASE);
+{   
+    BOOL result = 1;
+
+    if (table != nullptr)
+    {
+       result = VirtualFree(table, 0, MEM_RELEASE);
+       
+
+    }
     
     if (result == 0)
     {
@@ -38,16 +59,25 @@ bool HashTable::isEmpty()
 
 int HashTable::hashFunction(void* ptr)
 {
-    int h = hash(ptr);
-    h = h % hashGroups;
+    int hVal = h(ptr);
+    hVal = hVal % hashGroups;
 
-    std::cout << h << "\n";
+    if (hVal < 0)
+    {
+        hVal += hashGroups;
+    }
 
-    return h;
+    return hVal;
 }
 
 void HashTable::insertItem(void* ptr, AllocRecord &record)
-{
+{   
+    if (table == nullptr)
+    {
+        std::cerr << "ERROR: table is null!\n";
+        return;
+    }
+
     int hashValue = hashFunction(ptr);
     int start = hashValue;
 
@@ -55,9 +85,12 @@ void HashTable::insertItem(void* ptr, AllocRecord &record)
 
     while (table[hashValue].status == USED) //check if the slot is used
     {
-        if (table[hashValue].address != ptr) // to avoid duplicates we replace the record
-        {
+        if (table[hashValue].address == ptr) // to avoid duplicates we replace the record
+        {   
+            
             table[hashValue] = record;
+            table[hashValue].status = USED;
+
             return;
         }
 
@@ -84,7 +117,7 @@ void HashTable::insertItem(void* ptr, AllocRecord &record)
 
 void HashTable::deleteItem(void* ptr)
 {
-    int hashValue = hash(ptr);
+    int hashValue = hashFunction(ptr);
 
     while (table[hashValue].status == USED)
     {
@@ -107,7 +140,7 @@ void HashTable::deleteItem(void* ptr)
 
 AllocRecord* HashTable::searchTable(void* ptr)
 {
-    int hashValue = hash(ptr);
+    int hashValue = hashFunction(ptr);
 
     if (table[hashValue].address == ptr)
     {

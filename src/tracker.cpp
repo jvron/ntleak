@@ -1,4 +1,3 @@
-
 #include <windows.h>
 #include <errhandlingapi.h>
 #include <cstddef>
@@ -7,25 +6,21 @@
 #include <minwindef.h>
 #include <winnt.h>
 #include <iostream>
+
 #include <dbghelp.h>
 #pragma comment(lib, "dbghelp.lib")
 
 #include "tracker.h"
+#include "alloc_map.h"
 
 MemTracker tracker; // global tracker variable definition
 
 void MemTracker::init()
 {   
-    capacity = 10000;
-    count = 0;
+    capacity = MAX_CAPACITY;
+    allocCount = 0;
 
-    record = (AllocRecord*) VirtualAlloc(NULL, capacity * sizeof(AllocRecord), MEM_COMMIT, PAGE_READWRITE);
-
-    if (record == NULL)
-    {
-        record = nullptr;
-        std::cout << "tracker init allocation failed\n";
-    }
+    allocMap = HashTable();
 
     symInit = false;
 }
@@ -33,25 +28,34 @@ void MemTracker::init()
 
 void MemTracker::trackAlloc(size_t size, void* ptr)
 {
-    record[count] = {size, ptr, true};
-    record[count].frames = CaptureStackBackTrace(0, MAX_FRAMES, record[count].callStack, NULL);
-    count++;   
+    
+    AllocRecord rec;
+    rec.address = ptr;
+    rec.size = size;
+    rec.active = true;
+
+    rec.frames = CaptureStackBackTrace(2, MAX_FRAMES, rec.callStack, NULL);
+
+    rec.status = USED;
+
+    allocMap.insertItem(ptr, rec);
+
+    allocCount++;
+      
 }
 
 void MemTracker::trackFree(void *ptr)
-{
-    for (int i = count - 1; i >= 0; i--)
-    {   
-        
-        if(record[i].address == ptr && record[i]. active == true) 
-        {
-            record[i].active = false;
-            return; //prevent making unfreed memory as freed if it has the same address
-        }
+{   
+
+    AllocRecord *rec = allocMap.searchTable(ptr);
+
+    if( rec->address == ptr && rec->active == true)
+    {
+        rec->active = false;
     }
 }
 
-void MemTracker::resolveSymbols(AllocRecord &record)
+void MemTracker::resolveSymbols()
 {   
     
     if (!symInit)
@@ -60,7 +64,7 @@ void MemTracker::resolveSymbols(AllocRecord &record)
         if (!SymInitialize(hProcess, NULL, TRUE))
         {
             DWORD error = GetLastError();
-            std::cout << "Symbol init failed: " << error << "\n";
+            std::cerr << "Symbol init failed: " << error << "\n";
         }
         else {
 
@@ -69,90 +73,112 @@ void MemTracker::resolveSymbols(AllocRecord &record)
 
     }
 
-  
-    for (int i = 0; i < record.frames; i++)
+    for (int i = 0; i < allocMap.hashGroups; i++)
     {   
-        if (record.callStack[i] == nullptr) continue; 
+        AllocRecord &record = allocMap.table[i];
 
-        DWORD64 address = (DWORD64) record.callStack[i];
-        char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
+        for (int n = 0; n < MAX_FRAMES; n++)
+        {   
 
-        PSYMBOL_INFO pSymbol = (PSYMBOL_INFO) buffer;
-
-        pSymbol->SizeOfStruct = sizeof(SYMBOL_INFO);
-        pSymbol->MaxNameLen = MAX_SYM_NAME;
+            if (record.callStack[n] == nullptr) continue; 
         
+            DWORD64 address = (DWORD64) record.callStack[n];
+            char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
         
-        if (SymFromAddr(hProcess, address, 0, pSymbol))
-        {
-            //record.resolvedStack[i] = pSymbol->Name; 
-            strncpy_s(record.resolvedStack[i], MAX_SYM_NAME, pSymbol->Name, _TRUNCATE);
-        }
-        else  {
-            DWORD error = GetLastError();
-            std::cout << "symFromAdrr returned error :" << error << "\n"; 
-        }
-    }
-    
-}
-
-void resolve(MemTracker &tracker)
-{
-    for (int i = 0; i < tracker.count; i++ )
-    {
-        tracker.resolveSymbols(tracker.record[i]);
-    }
-}
-
-
-void MemTracker::report()
-{
-    std::cout << "================ Memory Leak Report ================\n";
-    
-    for (int i = 0; i < count; i++)
-    {
+            PSYMBOL_INFO pSymbol = (PSYMBOL_INFO) buffer;
         
-
-        std::cout << "Allocation #" << i << ": "
-                  << record[i].size << " bytes at " << record[i].address << "\n";
-
-        if (!record[i].active)
-        {
-            std::cout << "\tStatus: FREED\n";
-        }
-        else
-        {
-            std::cout << "\tStatus: LEAKED\n";
-        }
-
-        if (record[i].frames > 0)
-        {
-            std::cout << "\tStack Trace (" << record[i].frames << " frames):\n";
-
-            for (USHORT j = 0; j < record[i].frames; j++)
+            pSymbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+            pSymbol->MaxNameLen = MAX_SYM_NAME;
+            
+            
+            if (SymFromAddr(hProcess, address, 0, pSymbol))
             {
-                std::cout << "\t\t[" << j << "] " 
-                          << record[i].resolvedStack[j] << "\n";
+                //record.resolvedStack[i] = pSymbol->Name; 
+                strncpy_s(record.resolvedStack[n], MAX_SYM_NAME, pSymbol->Name, _TRUNCATE);
+            }
+            else  {
+                DWORD error = GetLastError();
+                std::cout << "symFromAdrr returned error :" << error << "\n"; 
             }
         }
-        std::cout << "---------------------------------------------------\n";
+    }
+        
+    
+}
+void MemTracker::report()
+{
+    size_t totalLeaked = 0;
+    size_t leakCount = 0;
+
+    // Count leaks and total leaked bytes
+    for (int i = 0; i < HashTable::hashGroups; i++)
+    {
+        AllocRecord& rec = allocMap.table[i];
+        if (rec.status == USED && rec.active)
+        {
+            totalLeaked += rec.size;
+            leakCount++;
+        }
     }
 
-    std::cout << "================ End of Report ====================\n";
+    std::cout << "\n=== MEMORY LEAK REPORT ===\n";
+    std::cout << "Leaks: " << leakCount << " allocations, " << totalLeaked << " bytes\n\n";
+
+    if (leakCount == 0)
+    {
+        std::cout << "No leaks detected.\n";
+        return;
+    }
+
+    // Iterate hash table and show details
+    for (int i = 0; i < HashTable::hashGroups; i++)
+    {
+        AllocRecord& rec = allocMap.table[i];
+        if (rec.status != USED || !rec.active) continue;
+
+        std::cout << "LEAK: " << rec.size << " bytes at " << rec.address << "\n";
+
+        bool foundUserCode = false;
+
+        for (USHORT j = 0; j < rec.frames; j++)
+        {
+            const char* symbol = rec.resolvedStack[j];
+            if (!symbol || symbol[0] == '\0') continue;
+
+            // Skip common CRT/system frames
+            if (strstr(symbol, "RtlUserThreadStart") ||
+                strstr(symbol, "BaseThreadInitThunk") ||
+                strstr(symbol, "__scrt_") ||
+                strstr(symbol, "invoke_main") ||
+                strstr(symbol, "malloc") ||
+                strstr(symbol, "HeapAlloc") ||
+                strstr(symbol, "detour"))
+            {
+                continue;
+            }
+
+            foundUserCode = true;
+            std::cout << "  " << symbol << "\n";
+        }
+
+        // If all frames were filtered, print full stack trace
+        if (!foundUserCode)
+        {
+            for (USHORT j = 0; j < rec.frames; j++)
+            {
+                if (rec.resolvedStack[j][0] != '\0')
+                    std::cout << "  " << rec.resolvedStack[j] << "\n";
+            }
+        }
+
+        std::cout << "\n";
+    }
 }
+
 
 
 void MemTracker::shutdown()
 {
-    BOOL result = VirtualFree(record, 0, MEM_RELEASE);
-    
-    if (result == 0)
-    {
-        std::cout << "virtualFree failed\n";
-        return;
-    }
-
-    record = nullptr;
 
     SymCleanup(hProcess);
 }

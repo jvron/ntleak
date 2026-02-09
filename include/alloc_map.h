@@ -1,8 +1,9 @@
 #pragma once
 
+#include <minwindef.h>
+#include <cstddef>
 #include <cstring>
 #include <functional>
-#include <minwindef.h>
 
 #define MAX_FRAMES 64
 #define MAX_SYM_NAME 256
@@ -36,14 +37,11 @@ struct AllocRecord{
 
 class HashTable {
 
-private:
-    static const int hashGroups = MAX_CAPACITY;
-    AllocRecord *table = nullptr; //table is a pointer that points to the first element of an array of AllocRecord objects. points to the first element of the block of memory
-
-    std::hash<void*> hash;
-
 public:
 
+    static const int hashGroups = MAX_CAPACITY;
+    //table is a pointer that points to the first element of an array of AllocRecord objects. points to the first element of the block of memory
+    AllocRecord *table = nullptr;
     HashTable();
     ~HashTable();
 
@@ -52,4 +50,9 @@ public:
     void insertItem(void* ptr, AllocRecord &record);
     void deleteItem(void* ptr);
     AllocRecord* searchTable(void* ptr);
+
+private:
+
+    std::hash<void*> hash;
+
 };

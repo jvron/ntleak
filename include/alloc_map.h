@@ -11,16 +11,16 @@
 
 enum RecordStatus {
 
+    EMPTY,
     USED,
-    DELETED,
-    UNUSED
+    DELETED
 };
 
 struct AllocRecord{
 
     size_t size;
     void* address;
-    bool active;
+    bool active; //if the allocation is still active after end of user program - leak
 
     void* callStack[MAX_FRAMES]; //call stack is the logical sequence of funtion calls, while stack is a region in memory 
     
@@ -29,7 +29,7 @@ struct AllocRecord{
     char resolvedStack[MAX_FRAMES][MAX_SYM_NAME];
 
     //for hash table - checks if the slot is used
-
+    
     RecordStatus status;
 
 };

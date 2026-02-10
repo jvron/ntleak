@@ -14,11 +14,8 @@ HashTable::HashTable()
         table = nullptr;
         return;
     }
-
-    //init all records to zero
+    //initialize all records to zero
     memset(table, 0, hashGroups * sizeof(AllocRecord));
-    
-   
 }
 
 HashTable::~HashTable()
@@ -28,13 +25,11 @@ HashTable::~HashTable()
     if (table != nullptr)
     {
        result = VirtualFree(table, 0, MEM_RELEASE);
-       
-
     }
     
-    if (result == 0)
+    if (table == nullptr || result == 0)
     {
-        std::cerr << "virtualFree failed\n";
+        std::cerr << " Table VirtualFree failed\n";
         return;
     }
 
@@ -43,8 +38,6 @@ HashTable::~HashTable()
 
 bool HashTable::isEmpty()
 {
-    int sum {};
-
     for (int i = 0; i < hashGroups; i++)
     {   
         
@@ -74,7 +67,7 @@ void HashTable::insertItem(void* ptr, AllocRecord &record)
 {   
     if (table == nullptr)
     {
-        std::cerr << "ERROR: table is null!\n";
+        //std::cerr << "ERROR: table is null!\n";
         return;
     }
 
@@ -83,7 +76,7 @@ void HashTable::insertItem(void* ptr, AllocRecord &record)
 
     //two different keys can map to the same hash - collision
 
-    while (table[hashValue].status == USED) //check if the slot is used
+    while (table[hashValue].status == USED || table[hashValue].status == EMPTY) //check if the slot is used or empty
     {
         if (table[hashValue].address == ptr) // to avoid duplicates we replace the record
         {   
@@ -101,10 +94,10 @@ void HashTable::insertItem(void* ptr, AllocRecord &record)
             break;
         }
 
-        if (table[hashValue].status == DELETED)
+        if (table[hashValue].status == DELETED || table[hashValue].status == EMPTY) // reuse deleted or empty slot 
         {
             table[hashValue] = record; 
-            table[hashValue].status = USED; // reuse deleted slot
+            table[hashValue].status = USED; 
             return;
         }
 
@@ -128,7 +121,7 @@ void HashTable::deleteItem(void* ptr)
         
         hashValue = (hashValue + 1) % hashGroups;
 
-        if (table[hashValue].status == DELETED)
+        if (table[hashValue].status == DELETED || table[hashValue].status == EMPTY)
         {   
             hashValue++;
             continue;
@@ -158,9 +151,9 @@ AllocRecord* HashTable::searchTable(void* ptr)
             hashValue = (hashValue + 1) % hashGroups;
         }
 
-        if (table[hashValue].status == DELETED)
+        if (table[hashValue].status == DELETED || table[hashValue].status == EMPTY)
         {
-            hashValue++; //skip deleted records
+            hashValue++; //skip deleted and empty records
         }
     }
 

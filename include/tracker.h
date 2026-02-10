@@ -28,6 +28,8 @@ public:
 
     void shutdown();
 
+    bool trackingEnabled;
+
 private:
 
     bool symInit;

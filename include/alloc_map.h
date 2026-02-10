@@ -4,9 +4,10 @@
 #include <cstddef>
 #include <cstring>
 #include <functional>
+#include <dbghelp.h>
 
 #define MAX_FRAMES 64
-#define MAX_SYM_NAME 256
+//#define MAX_SYM_NAME 256
 #define MAX_CAPACITY 10000
 
 enum RecordStatus {
@@ -28,9 +29,11 @@ struct AllocRecord{
 
     char resolvedStack[MAX_FRAMES][MAX_SYM_NAME];
 
-    //for hash table - checks if the slot is used
+    DWORD lineNum[MAX_FRAMES];
+    char fileName[MAX_FRAMES][MAX_PATH];
+
     
-    RecordStatus status;
+    RecordStatus status; //for hash table - checks if the slot is used
 
 };
 

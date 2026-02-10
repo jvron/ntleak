@@ -10,8 +10,12 @@
 
 
 int main(void)
-{
+{   
 
+    tracker.init();
+
+    tracker.trackingEnabled = false;
+    
     if (MH_Initialize() != MH_OK)
     {   
         std::cout << "Init faild\n";
@@ -21,23 +25,22 @@ int main(void)
         std::cout << "init success\n";
     }
     
-    tracker.init();
-    
-
     
     MH_STATUS status;
     status = hookHeapAlloc();
     status = hookHeapFree();
-
     status = hookVirtualAlloc();
     status = hookVirtualFree();
     
     //status = hookMalloc();
     //status = hookFree();
+
+    tracker.trackingEnabled = true;
     
     //testing
     int *pX = (int*) malloc(sizeof(int));
     int *pY = (int*) malloc(sizeof(int));
+    int *pZ = (int*) malloc(sizeof(long long));
     
     if (pX == NULL)
     {
@@ -46,16 +49,14 @@ int main(void)
     }
     
     *pX = 8;
-    
     *pY = 9;
-    
     
     //std::cout << status << "\n"; 
     //std::cout << *pX << "\n";
     
     free(pX);
-    
-    
+
+    tracker.trackingEnabled = false;
     status = removeHooks();
     
     if (MH_Uninitialize() != MH_OK)
@@ -63,8 +64,7 @@ int main(void)
         return 1;
     }
     
-    resolve(tracker);
-    
+    tracker.resolveSymbols();
     tracker.report();
     tracker.shutdown();
 

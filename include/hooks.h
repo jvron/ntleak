@@ -18,6 +18,8 @@ BOOL detourVirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType);
 MH_STATUS hookHeapAlloc();
 MH_STATUS hookHeapFree();
 
+MH_STATUS hookRealloc();
+
 MH_STATUS hookVirtualAlloc();
 MH_STATUS hookVirtualFree();
 

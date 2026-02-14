@@ -63,7 +63,7 @@ int HashTable::hashFunction(void* ptr)
     return hVal;
 }
 
-void HashTable::insertItem(void* ptr, AllocRecord &record)
+void HashTable::insertItem(void* ptr, AllocRecord record)
 {   
     if (table == nullptr)
     {
@@ -74,22 +74,24 @@ void HashTable::insertItem(void* ptr, AllocRecord &record)
     int hashValue = hashFunction(ptr);
     int start = hashValue;
 
+
+
     //two different keys can map to the same hash - collision
 
-    while (table[hashValue].status == USED || table[hashValue].status == EMPTY) //check if the slot is used or empty
-    {
+    while (table[hashValue].status == USED) //check if the slot is used 
+    {   
+       // printf("INSERT hashValue: %i for ptr: %p\n", hashValue, ptr);
+
         if (table[hashValue].address == ptr) // to avoid duplicates we replace the record
         {   
-            
             table[hashValue] = record;
             table[hashValue].status = USED;
-
             return;
         }
 
         hashValue = (hashValue + 1) % hashGroups; //modulus so that we dont go past the capacity
 
-        if (hashValue == start) //full circle - list full
+        if (hashValue == start) //full circle - list is full
         {
             break;
         }
@@ -100,12 +102,11 @@ void HashTable::insertItem(void* ptr, AllocRecord &record)
             table[hashValue].status = USED; 
             return;
         }
-
     }
 
     table[hashValue] = record;
     table[hashValue].status = USED;
-
+    //printf("INSERT hashValue: %i for ptr: %p\n", hashValue, ptr);
 }
 
 void HashTable::deleteItem(void* ptr)
@@ -135,6 +136,11 @@ AllocRecord* HashTable::searchTable(void* ptr)
 {
     int hashValue = hashFunction(ptr);
 
+    int start = hashValue;
+
+    //printf("SEARCH hashValue: %i for ptr: %p\n", hashValue, ptr);
+
+
     if (table[hashValue].address == ptr)
     {
         return &table[hashValue];
@@ -142,6 +148,7 @@ AllocRecord* HashTable::searchTable(void* ptr)
 
     while(table[hashValue].status == USED)
     {   
+
         if (table[hashValue].address == ptr )
         {
             return  &table[hashValue];
@@ -154,6 +161,11 @@ AllocRecord* HashTable::searchTable(void* ptr)
         if (table[hashValue].status == DELETED || table[hashValue].status == EMPTY)
         {
             hashValue++; //skip deleted and empty records
+        }
+
+        if (hashValue == start)
+        {
+            break;
         }
     }
 

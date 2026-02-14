@@ -1,5 +1,6 @@
 #pragma once
 
+#include <windows.h>
 #include <minwindef.h>
 #include <cstddef>
 #include <cstring>
@@ -50,7 +51,7 @@ public:
 
     bool isEmpty();
     int hashFunction(void* ptr);
-    void insertItem(void* ptr, AllocRecord &record);
+    void insertItem(void* ptr, AllocRecord record);
     void deleteItem(void* ptr);
     AllocRecord* searchTable(void* ptr);
 

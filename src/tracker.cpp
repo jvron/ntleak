@@ -59,9 +59,10 @@ void MemTracker::trackFree(void *ptr)
         {
             return;
         }
-    
-        if(rec->address == ptr && rec->active == true)
-        {
+
+        if(rec->address == ptr && rec->active == true && rec->status == USED)
+        {   
+            //printf("free tracked at: %p\n", ptr);
             rec->active = false;
         }
     }
@@ -96,7 +97,8 @@ void MemTracker::resolveSymbols()
         for (int n = 0; n < record.frames; n++)
         {   
             if (record.callStack[n] == nullptr) continue; 
-        
+            
+            DWORD displacement = 0;
             DWORD64 address = (DWORD64) record.callStack[n];
             char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
         
@@ -118,7 +120,7 @@ void MemTracker::resolveSymbols()
 
             //get file and line info
             IMAGEHLP_LINE64 Line;
-            DWORD displacement = 0;
+            
 
             Line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 
@@ -126,16 +128,14 @@ void MemTracker::resolveSymbols()
             {
 
                 record.lineNum[n] = Line.LineNumber;
-                strncpy_s(record.fileName[n], MAX_PATH, Line.FileName, _TRUNCATE);
+                strncpy_s(record.fileName[n], MAX_PATH, Line.FileName, _TRUNCATE); //copy file name 
             }
             else {
-                
+
                 //if unavailable
                 record.lineNum[n] = 0; 
                 record.fileName[n][0] = '\0';
-
             }
-
         }
     } 
 }
@@ -151,9 +151,12 @@ void MemTracker::report()
     // First pass: gather stats
     for (int i = 0; i < HashTable::hashGroups; i++)
     {
-        AllocRecord& rec = allocMap.table[i];
-        if (rec.status != USED || !rec.active)
+        AllocRecord &rec = allocMap.table[i];
+
+        if (rec.status != USED || rec.active == false)
+        {
             continue;
+        }
 
         totalLeaked += rec.size;
         leakCount++;
@@ -234,8 +237,8 @@ void MemTracker::report()
             // Filter system frames
             const char* systemPatterns[] = {
                 "RtlUserThreadStart","BaseThreadInitThunk","__scrt_",
-                "invoke_main","malloc","calloc","realloc","HeapAlloc",
-                "detour","operator new","operator delete","std::"
+                "invoke_main","mainCRTStartup","calloc","realloc","HeapAlloc",
+                "detour","operator","operator delete","std::"
             };
             bool isSystem = false;
             for (const char* p : systemPatterns)
@@ -286,11 +289,8 @@ void MemTracker::report()
     std::cout << std::string(60, '=') << "\n";
 }
 
-
-
 void MemTracker::shutdown()
 {
-
     SymCleanup(hProcess);
 }
 

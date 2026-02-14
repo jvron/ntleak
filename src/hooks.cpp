@@ -11,7 +11,6 @@
 #include "tracker.h"
 
 //function pointers that points to the original funtion. MinHook will store the target functions in these function pointers
-
 void* (*pMallocOriginal)(size_t size) = NULL;
 void (*pFreeOriginal)(void* ptr) = NULL;
 
@@ -20,10 +19,12 @@ void* (*pReallocOriginal)(void* memptr, size_t size) = NULL;
 LPVOID (*pHeapAllocOriginal)(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) = NULL;
 BOOL (*pHeapFreeOriginal) (HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) = NULL;
 
+LPVOID (*pHeapReAllocOriginal) (HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwBytes) = NULL;
+
 LPVOID (*pVirtualAllocOriginal) (LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect) = NULL;
 BOOL (*pVirtualFreeOriginal) (LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) = NULL; 
 
-
+//tls flags
 thread_local bool inMalloc = false;
 thread_local bool inRealloc = false;
 
@@ -42,14 +43,12 @@ void* detourMalloc(size_t size)
     //printf("malloc returned: %p\n", memptr);
     inMalloc = false;
     return memptr;
-
 }
 
 void detourFree(void *ptr)
 {   
     pFreeOriginal(ptr);
     tracker.trackFree(ptr);
-
     //printf("free called at: %p\n", ptr);
 }
 
@@ -60,26 +59,31 @@ void* detourRealloc(void *memptr, size_t size)
 
     if(newptr != NULL)
     {   
-        if (newptr != memptr) // new pointer returned by realloc, old ptr freed
+        if (memptr == NULL) //same as malloc
+        {
+            tracker.trackAlloc(size, newptr);
+        }
+
+        else if (newptr != memptr) // new pointer returned by realloc, old ptr freed
         {
             tracker.trackFree(memptr);
             tracker.trackAlloc(size, newptr);
         }
-        else if (memptr == NULL) //same as malloc
-        {
-            tracker.trackAlloc(size, newptr);
-        }
+        
         else if (newptr == memptr)
         {
             tracker.trackAlloc(size, memptr); // replace the old allocation with new size
         }
     }
+    else { // newptr == NULL
 
-    if (newptr == NULL && size == 0)
-    {
-        // same as free
-        tracker.trackFree(memptr);
+        if (size == 0)
+        {
+            // same as free
+            tracker.trackFree(memptr);
+        }
     }
+
 
     //printf("realloc called at: %p\n", memptr);
     //printf("realloc returned: %p\n", newptr);
@@ -91,7 +95,6 @@ LPVOID detourHeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes)
 {
     void* memptr = pHeapAllocOriginal(hHeap, dwFlags, dwBytes);
     
-
     if (memptr != NULL && !inMalloc && !inRealloc) // do not track heapAlloc triggered by malloc and realloc
     {   
         tracker.trackAlloc(dwBytes, memptr);
@@ -113,14 +116,50 @@ BOOL detourHeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem)
     return result;
 }
 
+LPVOID detourHeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwBytes)
+{
+    
+    void* newptr = pHeapReAllocOriginal(hHeap, dwFlags, lpMem, dwBytes);
+
+    if(newptr != NULL)
+    {   
+        if (!inRealloc &&! inMalloc)
+        {
+            if (lpMem == NULL) //same as HeapAlloc
+            {
+                tracker.trackAlloc(dwBytes, newptr);
+            }
+            else if (newptr != lpMem) // new pointer returned by HeapReAlloc, old ptr freed
+            {
+                tracker.trackFree(lpMem);
+                tracker.trackAlloc(dwBytes, newptr);
+            }
+            else if (newptr == lpMem)
+            {
+                tracker.trackAlloc(dwBytes, lpMem); // replace the old allocation with new size
+            }
+        }
+    }
+    else  {
+        if (dwBytes == 0 && !inRealloc &&! inMalloc)
+        {
+            tracker.trackFree(lpMem);
+        }
+    }
+
+    //printf("HeapReAlloc called at: %p\n", memptr);
+    //printf("HeapReAlloc returned: %p\n", newptr);
+    return newptr;
+}
+
 PVOID detourVirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect)
 {
     void* memptr = pVirtualAllocOriginal(lpAddress, dwSize, flAllocationType, flProtect);
+
     if (memptr != NULL)
     {
         tracker.trackAlloc(dwSize, memptr);
     }
-
     return memptr;
 }
 
@@ -135,43 +174,6 @@ BOOL detourVirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType)
 
     return result;
 
-}
-
-MH_STATUS removeHooks()
-{   
-    MH_STATUS status;
-
-    status = MH_DisableHook((void*)&malloc);
-    if (status != MH_OK) return status;
-    
-
-    status = MH_DisableHook((void*)&free);
-    if (status != MH_OK)
-    {
-        return status;
-    }
-
-    status = MH_DisableHook((void*)&HeapAlloc);
-    if (status != MH_OK)
-    {
-        return status;
-    }
-
-    status = MH_DisableHook((void*)&HeapFree);
-    if (status != MH_OK) return status;
-
-    status = MH_DisableHook((void*)&realloc);
-    if(status != MH_OK) return status;
-
-    MH_RemoveHook((void*)&malloc);
-    MH_RemoveHook((void*)&free);
-    MH_RemoveHook((void*)&HeapAlloc);
-    MH_RemoveHook((void*)&HeapFree);
-    MH_RemoveHook((void*)&VirtualAlloc);
-    MH_RemoveHook((void*)&VirtualFree);
-    MH_RemoveHook((void*)&realloc);
-
-    return status;
 }
 
 MH_STATUS hookMalloc()
@@ -255,6 +257,28 @@ MH_STATUS hookHeapAlloc()
 }
 
 
+MH_STATUS hookHeapReAlloc()
+{
+    MH_STATUS status;
+
+    status = MH_CreateHook((void*)&HeapReAlloc, (void*) &detourHeapReAlloc, reinterpret_cast<LPVOID*>(&pHeapReAllocOriginal));
+
+    if(status != MH_OK)
+    {
+        return status;
+    }
+
+    status = MH_EnableHook((void*)&HeapReAlloc);
+    if (status != MH_OK)
+    {
+        return status;
+    }
+
+    return status;
+}
+
+
+
 MH_STATUS hookVirtualAlloc()
 {
     MH_STATUS status;
@@ -315,5 +339,45 @@ MH_STATUS hookVirtualFree()
         return status;
     }
     
+    return status;
+}
+
+
+MH_STATUS removeHooks()
+{   
+    MH_STATUS status;
+
+    status = MH_DisableHook((void*)&malloc);
+    if (status != MH_OK) return status;
+
+    status = MH_DisableHook((void*)&free);
+    if (status != MH_OK)
+    {
+        return status;
+    }
+
+    status = MH_DisableHook((void*)&HeapAlloc);
+    if (status != MH_OK)
+    {
+        return status;
+    }
+
+    status = MH_DisableHook((void*)&HeapFree);
+    if (status != MH_OK) return status;
+
+    status = MH_DisableHook((void*)&realloc);
+    if(status != MH_OK) return status;
+
+    status = MH_DisableHook((void*)&HeapReAlloc);
+    if(status != MH_OK) return status;
+
+    MH_RemoveHook((void*)&malloc);
+    MH_RemoveHook((void*)&free);
+    MH_RemoveHook((void*)&HeapAlloc);
+    MH_RemoveHook((void*)&HeapFree);
+    MH_RemoveHook((void*)&VirtualAlloc);
+    MH_RemoveHook((void*)&VirtualFree);
+    MH_RemoveHook((void*)&realloc);
+
     return status;
 }

@@ -1,6 +1,6 @@
+#include <windows.h>
 #include <corecrt.h>
 #include <cstring>
-#include <windows.h>
 #include <iomanip>
 #include <cstddef>
 #include <libloaderapi.h>
@@ -9,7 +9,6 @@
 #include <winnt.h>
 #include <iostream>
 #include <sstream>
-
 
 #include <dbghelp.h>
 #pragma comment(lib, "dbghelp.lib")
@@ -23,7 +22,6 @@ void MemTracker::init()
 {   
     capacity = MAX_CAPACITY;
     allocCount = 0;
-
     symInit = false;
 }
 
@@ -36,21 +34,17 @@ void MemTracker::trackAlloc(size_t size, void* ptr)
         rec.address = ptr;
         rec.size = size;
         rec.active = true;
-    
         rec.frames = CaptureStackBackTrace(2, MAX_FRAMES, rec.callStack, NULL);
-    
         rec.status = USED;
     
         allocMap.insertItem(ptr, rec);
     
         allocCount++;
     }
-      
 }
 
 void MemTracker::trackFree(void *ptr)
 {   
-
     if (trackingEnabled)
     {
         AllocRecord *rec = allocMap.searchTable(ptr);

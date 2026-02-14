@@ -17,6 +17,7 @@ void (*pFreeOriginal)(void* ptr) = NULL;
 void* (*pReallocOriginal)(void* memptr, size_t size) = NULL;
 
 void* (*pOperatorNewOriginal) (size_t size) = NULL;
+void (*pOperatorDeleteOriginal)(void* ptr) = NULL;
 
 LPVOID (*pHeapAllocOriginal)(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) = NULL;
 BOOL (*pHeapFreeOriginal) (HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) = NULL;
@@ -29,6 +30,7 @@ BOOL (*pVirtualFreeOriginal) (LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType)
 //tls flags
 thread_local bool inMalloc = false;
 thread_local bool inRealloc = false;
+thread_local bool inOperatorNew = false;
 
 
 void* detourMalloc(size_t size)
@@ -37,7 +39,7 @@ void* detourMalloc(size_t size)
 
     void *memptr = pMallocOriginal(size);
 
-    if (memptr != NULL)
+    if (memptr != NULL && !inOperatorNew)
     {
         tracker.trackAlloc(size, memptr);
     };
@@ -94,7 +96,8 @@ void* detourRealloc(void *memptr, size_t size)
 }
 
 void* detourOperatorNew(size_t size)
-{
+{   
+    inOperatorNew = true;
     void* memptr = pOperatorNewOriginal(size);
     //std::bad_alloc is automatically handled
 
@@ -102,7 +105,15 @@ void* detourOperatorNew(size_t size)
     {
         tracker.trackAlloc(size, memptr);
     }
+
+    inOperatorNew = false;
     return memptr;
+}
+
+void detourOperatorDelete(void *ptr)
+{
+    pOperatorDeleteOriginal(ptr);
+    tracker.trackFree(ptr);
 }
 
 LPVOID detourHeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes)
@@ -250,7 +261,6 @@ MH_STATUS hookRealloc()
 MH_STATUS hookOperatorNew()
 {
     MH_STATUS status;
-
     //(void* (*)(std::size_t)) &operator new;
 
     status = MH_CreateHook((void*)(void* (*)(std::size_t)) &operator new, (void*) &detourOperatorNew, reinterpret_cast<LPVOID*>(&pOperatorNewOriginal));
@@ -264,6 +274,28 @@ MH_STATUS hookOperatorNew()
     {
         return status;
     }
+    return status;
+}
+
+MH_STATUS hookOperatorDelete()
+{
+    MH_STATUS status;
+
+    //(void*)(void (*)(void*)) &operator delete
+    
+    status = MH_CreateHook((void*)(void (*)(void*)) &operator delete, (void*) &detourOperatorDelete, reinterpret_cast<LPVOID*>(&pOperatorDeleteOriginal));
+
+    if(status != MH_OK)
+    {
+        return status;
+    }
+
+    status = MH_EnableHook((void*)(void*)(void (*)(void*)) &operator delete);
+    if (status != MH_OK)
+    {
+        return status;
+    }
+    
     return status;
 }
 
@@ -400,6 +432,9 @@ MH_STATUS removeHooks()
     status = MH_DisableHook((void*)(void* (*)(std::size_t)) &operator new);
     if(status != MH_OK) return status;
 
+    status = MH_DisableHook((void*)(void (*)(void*)) &operator delete);
+    if(status != MH_OK) return status;
+
     MH_RemoveHook((void*)&malloc);
     MH_RemoveHook((void*)&free);
     MH_RemoveHook((void*)&HeapAlloc);
@@ -408,6 +443,7 @@ MH_STATUS removeHooks()
     MH_RemoveHook((void*)&VirtualFree);
     MH_RemoveHook((void*)&realloc);
     MH_RemoveHook((void*)(void* (*)(std::size_t)) &operator new);
+    MH_RemoveHook((void*)(void (*)(void*)) &operator delete);
 
     return status;
 }

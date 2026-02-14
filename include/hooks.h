@@ -12,6 +12,7 @@ void* detourMalloc(size_t size);
 void detourFree(void* ptr);
 
 void* detourOperatorNew(size_t size);
+void detourOperatorDelete(void* ptr);
 
 
 LPVOID detourHeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes);
@@ -37,5 +38,6 @@ MH_STATUS hookMalloc();
 MH_STATUS hookFree();
 
 MH_STATUS hookOperatorNew();
+MH_STATUS hookOperatorDelete();
 
 MH_STATUS removeHooks();

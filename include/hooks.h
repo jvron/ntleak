@@ -14,6 +14,9 @@ void detourFree(void* ptr);
 void* detourOperatorNew(size_t size);
 void detourOperatorDelete(void* ptr);
 
+void* detourOperatorNewArray(size_t size);
+void detourOperatorDeleteArray(void* ptr);
+
 
 LPVOID detourHeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes);
 BOOL detourHeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem);
@@ -39,5 +42,8 @@ MH_STATUS hookFree();
 
 MH_STATUS hookOperatorNew();
 MH_STATUS hookOperatorDelete();
+
+MH_STATUS hookOperatorNewArray();
+MH_STATUS hookOperatorDeleteArray();
 
 MH_STATUS removeHooks();

@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <winnt.h>
 
+MH_STATUS initMinHook();
+MH_STATUS uninitMinHook();
 
 void* detourMalloc(size_t size);
 void detourFree(void* ptr);

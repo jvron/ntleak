@@ -35,6 +35,20 @@ thread_local bool inMalloc = false;
 thread_local bool inRealloc = false;
 thread_local bool inOperatorNew = false;
 
+MH_STATUS initMinHook()
+{
+    MH_STATUS status;
+    status = MH_Initialize();
+    if(status != MH_OK) return status;
+    return status;
+}
+MH_STATUS uninitMinHook()
+{
+    MH_STATUS status;
+    status = MH_Uninitialize();
+    if(status != MH_OK) return status;
+    return status;
+}
 
 void* detourMalloc(size_t size)
 {   

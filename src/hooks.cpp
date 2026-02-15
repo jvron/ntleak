@@ -224,12 +224,6 @@ BOOL detourVirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType)
 MH_STATUS hookMalloc()
 {
     MH_STATUS status;
-    
-    status = MH_CreateHook((void*)&malloc, (void*) &detourMalloc, reinterpret_cast<LPVOID*>(&pMallocOriginal));
-    if(status != MH_OK)
-    {
-        return status;
-    }
 
     status = MH_EnableHook((void*)&malloc);
     if (status != MH_OK)
@@ -243,13 +237,6 @@ MH_STATUS hookFree()
 {
     MH_STATUS status;
 
-    status = MH_CreateHook((void*)&free, (void*) &detourFree, reinterpret_cast<LPVOID*>(&pFreeOriginal));
-
-    if(status != MH_OK)
-    {
-        return status;
-    }
-
     status = MH_EnableHook((void*)&free);
     if (status != MH_OK)
     {
@@ -262,13 +249,6 @@ MH_STATUS hookFree()
 MH_STATUS hookRealloc()
 {
     MH_STATUS status;
-
-    status = MH_CreateHook((void*)&realloc, (void*) &detourRealloc, reinterpret_cast<LPVOID*>(&pReallocOriginal));
-
-    if(status != MH_OK)
-    {
-        return status;
-    }
 
     status = MH_EnableHook((void*)&realloc);
     if (status != MH_OK)
@@ -284,12 +264,6 @@ MH_STATUS hookOperatorNew()
     MH_STATUS status;
     //(void* (*)(std::size_t)) &operator new;
 
-    status = MH_CreateHook((void*)(void* (*)(std::size_t)) &operator new, (void*) &detourOperatorNew, reinterpret_cast<LPVOID*>(&pOperatorNewOriginal));
-    if(status != MH_OK)
-    {
-        return status;
-    }
-
     status = MH_EnableHook((void*)(void* (*)(std::size_t)) &operator new);
     if (status != MH_OK)
     {
@@ -298,20 +272,11 @@ MH_STATUS hookOperatorNew()
     return status;
 }
 
-
-
 MH_STATUS hookOperatorDelete()
 {
     MH_STATUS status;
 
     //(void*)(void (*)(void*)) &operator delete
-
-    status = MH_CreateHook((void*)(void (*)(void*)) &operator delete, (void*) &detourOperatorDelete, reinterpret_cast<LPVOID*>(&pOperatorDeleteOriginal));
-
-    if(status != MH_OK)
-    {
-        return status;
-    }
 
     status = MH_EnableHook((void*)(void*)(void (*)(void*)) &operator delete);
     if (status != MH_OK)
@@ -325,13 +290,7 @@ MH_STATUS hookOperatorDelete()
 MH_STATUS hookOperatorNewArray()
 {
     MH_STATUS status;
-    //(void* (*)(std::size_t)) &operator new[];
-
-    status = MH_CreateHook((void*)(void* (*)(std::size_t)) &operator new[], (void*) &detourOperatorNew, reinterpret_cast<LPVOID*>(&pOperatorNewArrayOriginal));
-    if(status != MH_OK)
-    {
-        return status;
-    }
+    //(void* (*)(std::size_t)) &operator new[]
 
     status = MH_EnableHook((void*)(void* (*)(std::size_t)) &operator new[]);
     if (status != MH_OK)
@@ -341,19 +300,11 @@ MH_STATUS hookOperatorNewArray()
     return status;
 }
 
-
 MH_STATUS hookOperatorDeleteArray()
 {
     MH_STATUS status;
 
     //(void*)(void (*)(void*)) &operator delete[]
-
-    status = MH_CreateHook((void*)(void (*)(void*)) &operator delete[], (void*) &detourOperatorDelete, reinterpret_cast<LPVOID*>(&pOperatorDeleteArrayOriginal));
-
-    if(status != MH_OK)
-    {
-        return status;
-    }
 
     status = MH_EnableHook((void*)(void*)(void (*)(void*)) &operator delete[]);
     if (status != MH_OK)
@@ -368,13 +319,6 @@ MH_STATUS hookHeapAlloc()
 {
     MH_STATUS status;
 
-    status = MH_CreateHook((void*)&HeapAlloc, (void*) &detourHeapAlloc, reinterpret_cast<LPVOID*>(&pHeapAllocOriginal));
-
-    if(status != MH_OK)
-    {
-        return status;
-    }
-
     status = MH_EnableHook((void*)&HeapAlloc);
     if (status != MH_OK)
     {
@@ -387,13 +331,6 @@ MH_STATUS hookHeapAlloc()
 MH_STATUS hookHeapReAlloc()
 {
     MH_STATUS status;
-
-    status = MH_CreateHook((void*)&HeapReAlloc, (void*) &detourHeapReAlloc, reinterpret_cast<LPVOID*>(&pHeapReAllocOriginal));
-
-    if(status != MH_OK)
-    {
-        return status;
-    }
 
     status = MH_EnableHook((void*)&HeapReAlloc);
     if (status != MH_OK)
@@ -408,13 +345,6 @@ MH_STATUS hookVirtualAlloc()
 {
     MH_STATUS status;
 
-    status = MH_CreateHook((void*)&VirtualAlloc, (void*) &detourVirtualAlloc, reinterpret_cast<LPVOID*>(&pVirtualAllocOriginal));
-
-    if(status != MH_OK)
-    {
-        return status;
-    }
-
     status = MH_EnableHook((void*)&VirtualAlloc);
     if (status != MH_OK)
     {
@@ -427,13 +357,6 @@ MH_STATUS hookVirtualAlloc()
 MH_STATUS hookHeapFree()
 {
     MH_STATUS status;
-
-    status = MH_CreateHook((void*)&HeapFree, (void*) &detourHeapFree, reinterpret_cast<LPVOID*>(&pHeapFreeOriginal));
-
-    if(status != MH_OK)
-    {
-        return status;
-    }
 
     status = MH_EnableHook((void*)&HeapFree);
   
@@ -448,14 +371,6 @@ MH_STATUS hookHeapFree()
 MH_STATUS hookVirtualFree()
 {
     MH_STATUS status;
-
-    status = MH_CreateHook((void*)&VirtualFree, (void*) &detourVirtualFree, reinterpret_cast<LPVOID*>(&pVirtualFreeOriginal));
-
-    if(status != MH_OK)
-    {
-        return status;
-    }
-
     status = MH_EnableHook((void*)&VirtualFree);
   
     if (status != MH_OK)
@@ -466,24 +381,149 @@ MH_STATUS hookVirtualFree()
     return status;
 }
 
-MH_STATUS removeHooks()
-{   
+MH_STATUS createHooks()
+{
+    MH_STATUS status;
+
+    //malloc
+    status = MH_CreateHook((void*)&malloc, (void*) &detourMalloc, reinterpret_cast<LPVOID*>(&pMallocOriginal));
+    if(status != MH_OK)
+    {
+        return status;
+    }
+    //free
+    status = MH_CreateHook((void*)&free, (void*) &detourFree, reinterpret_cast<LPVOID*>(&pFreeOriginal));
+
+    if(status != MH_OK)
+    {
+        return status;
+    }
+    //realloc
+    status = MH_CreateHook((void*)&realloc, (void*) &detourRealloc, reinterpret_cast<LPVOID*>(&pReallocOriginal));
+
+    if(status != MH_OK)
+    {
+        return status;
+    }
+    //operator new
+    status = MH_CreateHook((void*)(void* (*)(std::size_t)) &operator new, (void*) &detourOperatorNew, reinterpret_cast<LPVOID*>(&pOperatorNewOriginal));
+    if(status != MH_OK)
+    {
+        return status;
+    }
+    //operator delete
+    status = MH_CreateHook((void*)(void (*)(void*)) &operator delete, (void*) &detourOperatorDelete, reinterpret_cast<LPVOID*>(&pOperatorDeleteOriginal));
+
+    if(status != MH_OK)
+    {
+        return status;
+    }
+    //operator new[]
+    status = MH_CreateHook((void*)(void* (*)(std::size_t)) &operator new[], (void*) &detourOperatorNewArray, reinterpret_cast<LPVOID*>(&pOperatorNewArrayOriginal));
+    if(status != MH_OK)
+    {
+        return status;
+    }
+    //operator delete[]
+    status = MH_CreateHook((void*)(void (*)(void*)) &operator delete[], (void*) &detourOperatorDeleteArray, reinterpret_cast<LPVOID*>(&pOperatorDeleteArrayOriginal));
+
+    if(status != MH_OK)
+    {
+        return status;
+    }
+    //heapalloc
+    status = MH_CreateHook((void*)&HeapAlloc, (void*) &detourHeapAlloc, reinterpret_cast<LPVOID*>(&pHeapAllocOriginal));
+    if(status != MH_OK)
+    {
+        return status;
+    }
+    //heaprealloc
+    status = MH_CreateHook((void*)&HeapReAlloc, (void*) &detourHeapReAlloc, reinterpret_cast<LPVOID*>(&pHeapReAllocOriginal));
+
+    if(status != MH_OK)
+    {
+        return status;
+    }
+    //virtual alloc
+    status = MH_CreateHook((void*)&VirtualAlloc, (void*) &detourVirtualAlloc, reinterpret_cast<LPVOID*>(&pVirtualAllocOriginal));
+
+    if(status != MH_OK)
+    {
+        return status;
+    }
+
+    //heapfree
+    status = MH_CreateHook((void*)&HeapFree, (void*) &detourHeapFree, reinterpret_cast<LPVOID*>(&pHeapFreeOriginal));
+
+    if(status != MH_OK)
+    {
+        return status;
+    }
+    //virtualfree
+    status = MH_CreateHook((void*)&VirtualFree, (void*) &detourVirtualFree, reinterpret_cast<LPVOID*>(&pVirtualFreeOriginal));
+
+    if(status != MH_OK)
+    {
+        return status;
+    }
+
+    return status;
+}
+
+MH_STATUS enableHooks()
+{
+    MH_STATUS status;
+    
+    status = hookHeapAlloc();
+    if(status != MH_OK) return status;
+
+    status = hookHeapFree();
+    if(status != MH_OK) return status;
+
+    status = hookHeapReAlloc();
+    if(status != MH_OK) return status;
+
+    status = hookRealloc();
+    if(status != MH_OK) return status;
+
+    status = hookVirtualAlloc();
+    if(status != MH_OK) return status;
+
+    status = hookVirtualFree();
+    if(status != MH_OK) return status;
+    
+    status = hookMalloc();
+    if(status != MH_OK) return status;
+
+    status = hookFree();
+    if(status != MH_OK) return status;
+
+    status = hookOperatorNew();
+    if(status != MH_OK) return status;
+
+    status = hookOperatorDelete();
+    if(status != MH_OK) return status;
+
+    status = hookOperatorNewArray();
+    if(status != MH_OK) return status;
+    status = hookOperatorDeleteArray();
+    if(status != MH_OK) return status;
+
+    return status;
+}
+
+MH_STATUS disableHooks()
+{
     MH_STATUS status;
 
     status = MH_DisableHook((void*)&malloc);
     if (status != MH_OK) return status;
 
     status = MH_DisableHook((void*)&free);
-    if (status != MH_OK)
-    {
-        return status;
-    }
+    if (status != MH_OK) return status;
 
     status = MH_DisableHook((void*)&HeapAlloc);
-    if (status != MH_OK)
-    {
-        return status;
-    }
+    if (status != MH_OK) return status;
 
     status = MH_DisableHook((void*)&HeapFree);
     if (status != MH_OK) return status;
@@ -506,18 +546,45 @@ MH_STATUS removeHooks()
     status = MH_DisableHook((void*)(void (*)(void*)) &operator delete[]);
     if(status != MH_OK) return status;
 
-    MH_RemoveHook((void*)&malloc);
-    MH_RemoveHook((void*)&free);
-    MH_RemoveHook((void*)&HeapAlloc);
-    MH_RemoveHook((void*)&HeapFree);
-    MH_RemoveHook((void*)&VirtualAlloc);
-    MH_RemoveHook((void*)&VirtualFree);
-    MH_RemoveHook((void*)&realloc);
-    MH_RemoveHook((void*)(void* (*)(std::size_t)) &operator new);
-    MH_RemoveHook((void*)(void (*)(void*)) &operator delete);
+    return status;
+}
 
-    MH_RemoveHook((void*)(void* (*)(std::size_t)) &operator new[]);
-    MH_RemoveHook((void*)(void (*)(void*)) &operator delete[]);
+MH_STATUS removeHooks()
+{   
+    MH_STATUS status;
+
+    status = MH_RemoveHook((void*)&malloc);
+    if(status != MH_OK) return status;
+
+    status = MH_RemoveHook((void*)&free);
+    if(status != MH_OK) return status;
+
+    status = MH_RemoveHook((void*)&HeapAlloc);
+    if(status != MH_OK) return status;
+
+    status = MH_RemoveHook((void*)&HeapFree);
+    if(status != MH_OK) return status;
+
+    status = MH_RemoveHook((void*)&VirtualAlloc);
+    if(status != MH_OK) return status;
+
+    status = MH_RemoveHook((void*)&VirtualFree);
+    if(status != MH_OK) return status;
+
+    status = MH_RemoveHook((void*)&realloc);
+    if(status != MH_OK) return status;
+
+    status = MH_RemoveHook((void*)(void* (*)(std::size_t)) &operator new);
+    if(status != MH_OK) return status;
+
+    status = MH_RemoveHook((void*)(void (*)(void*)) &operator delete);
+    if(status != MH_OK) return status;
+
+    status = MH_RemoveHook((void*)(void* (*)(std::size_t)) &operator new[]);
+    if(status != MH_OK) return status;
+
+    status = MH_RemoveHook((void*)(void (*)(void*)) &operator delete[]);
+    if(status != MH_OK) return status;
 
     return status;
 }

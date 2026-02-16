@@ -25,19 +25,13 @@ struct AllocRecord{
     bool active; //if the allocation is still active after end of user program - leak
 
     void* callStack[MAX_FRAMES]; //call stack is the logical sequence of funtion calls, while stack is a region in memory 
-    
     USHORT frames; //unsigned short - 16bit / 2 byte int. Holds the number of stack frames
-
     char resolvedStack[MAX_FRAMES][MAX_SYM_NAME];
-
     DWORD lineNum[MAX_FRAMES];
     char fileName[MAX_FRAMES][MAX_PATH];
 
-    
     RecordStatus status; //for hash table - checks if the slot is used
-
 };
-
 
 class HashTable {
 
@@ -56,7 +50,6 @@ public:
     AllocRecord* searchTable(void* ptr);
 
 private:
-
+    HANDLE hMapFile; // handle ro file mapping
     std::hash<void*> h;
-
 };

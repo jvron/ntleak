@@ -1,11 +1,36 @@
+#include <errhandlingapi.h>
+#include <handleapi.h>
 #include <windows.h>
 #include <memoryapi.h>
-#include <iostream>
+#include <winnt.h>
 #include "alloc_map.h"
 
-
 HashTable::HashTable()
-{
+{   
+    //create a page and name it
+    hMapFile = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, hashGroups * sizeof(AllocRecord), "Global\\ntleak_allocation_table");
+
+    if (hMapFile == NULL)
+    {   
+        printf("Could not create file mapping object (%lu).\n", GetLastError());
+        return;
+    }
+
+    //get the pointer to the address of the page
+    table = (AllocRecord*) MapViewOfFile(hMapFile, FILE_MAP_ALL_ACCESS, 0,  0,  hashGroups * sizeof(AllocRecord));
+
+    if (table == NULL)
+    {
+        printf("Could not map view of file (%lu).\n", GetLastError());
+        CloseHandle(hMapFile);
+        table = nullptr;
+        return;
+    }
+
+    //initialize all records to zero
+    memset(table, 0, hashGroups * sizeof(AllocRecord));
+
+    /*
     table = (AllocRecord*) VirtualAlloc(NULL, hashGroups * sizeof(AllocRecord), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 
     if (table == nullptr)
@@ -14,14 +39,15 @@ HashTable::HashTable()
         table = nullptr;
         return;
     }
-    //initialize all records to zero
-    memset(table, 0, hashGroups * sizeof(AllocRecord));
+
+    */
+    
 }
 
 HashTable::~HashTable()
 {   
+    /*
     BOOL result = 1;
-
     if (table != nullptr)
     {
        result = VirtualFree(table, 0, MEM_RELEASE);
@@ -32,6 +58,10 @@ HashTable::~HashTable()
         std::cerr << " Table VirtualFree failed\n";
         return;
     }
+        */
+
+    UnmapViewOfFile(table);
+    CloseHandle(hMapFile);
 
     table = nullptr;
 }
@@ -73,8 +103,6 @@ void HashTable::insertItem(void* ptr, AllocRecord record)
 
     int hashValue = hashFunction(ptr);
     int start = hashValue;
-
-
 
     //two different keys can map to the same hash - collision
 
@@ -139,7 +167,6 @@ AllocRecord* HashTable::searchTable(void* ptr)
     int start = hashValue;
 
     //printf("SEARCH hashValue: %i for ptr: %p\n", hashValue, ptr);
-
 
     if (table[hashValue].address == ptr)
     {

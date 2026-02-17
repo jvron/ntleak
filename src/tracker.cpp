@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <processthreadsapi.h>
 #include <MinHook.h>
 #include <corecrt.h>
 #include <cstring>
@@ -16,6 +17,7 @@
 
 #include "tracker.h"
 #include "alloc_map.h"
+#include "hooks.h"
 
 MemTracker tracker; // global tracker variable definition
 
@@ -25,6 +27,11 @@ void MemTracker::init()
     capacity = MAX_CAPACITY;
     allocCount = 0;
     symInit = false;
+
+    g_tlsHeapAlloc = TlsAlloc();
+    g_tlsMalloc = TlsAlloc();
+    g_tlsRealloc = TlsAlloc();
+    g_tlsOperatorNew = TlsAlloc();
 
     if (!symInit)
     {
@@ -352,5 +359,9 @@ void MemTracker::report()
 void MemTracker::shutdown()
 {
     SymCleanup(hProcess);
+    TlsFree(g_tlsHeapAlloc);
+    TlsFree(g_tlsMalloc);
+    TlsFree(g_tlsRealloc);
+    TlsFree(g_tlsOperatorNew);
 }
 

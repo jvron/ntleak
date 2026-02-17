@@ -37,9 +37,16 @@ VOID (*pExitProcessOriginal) (UINT uExitCode) = NULL;
 MH_STATUS removeHooks();
 
 //tls flags
-thread_local bool inMalloc = false;
-thread_local bool inRealloc = false;
-thread_local bool inOperatorNew = false;
+//thread_local bool inMalloc = false;
+//thread_local bool inRealloc = false;
+//thread_local bool inOperatorNew = false;
+//thread_local bool inHeapAlloc = false;
+
+//tls flags
+DWORD g_tlsHeapAlloc = TLS_OUT_OF_INDEXES;
+DWORD g_tlsMalloc = TLS_OUT_OF_INDEXES;
+DWORD g_tlsRealloc = TLS_OUT_OF_INDEXES;
+DWORD g_tlsOperatorNew = TLS_OUT_OF_INDEXES;
 
 MH_STATUS initMinHook()
 {
@@ -58,17 +65,18 @@ MH_STATUS uninitMinHook()
 
 void* detourMalloc(size_t size)
 {   
-    inMalloc = true;
+    TlsSetValue(g_tlsMalloc, (LPVOID) 1);
 
     void *memptr = pMallocOriginal(size);
 
-    if (memptr != NULL && !inOperatorNew)
+    if (memptr != NULL && !TlsGetValue(g_tlsOperatorNew))
     {
         tracker.trackAlloc(size, memptr);
     };
 
     //printf("malloc returned: %p\n", memptr);
-    inMalloc = false;
+    
+    TlsSetValue(g_tlsMalloc, (LPVOID) 0);
     return memptr;
 }
 
@@ -81,7 +89,9 @@ void detourFree(void *ptr)
 
 void* detourRealloc(void *memptr, size_t size)
 {   
-    inRealloc = true;
+    //inRealloc = true;
+    TlsSetValue(g_tlsRealloc, (LPVOID) 1);
+
     void* newptr = pReallocOriginal(memptr, size);
 
     if(newptr != NULL)
@@ -111,16 +121,17 @@ void* detourRealloc(void *memptr, size_t size)
         }
     }
 
-
     //printf("realloc called at: %p\n", memptr);
     //printf("realloc returned: %p\n", newptr);
-    inRealloc = false;
+    TlsSetValue(g_tlsRealloc, (LPVOID) 0);
     return newptr;
 }
 
 void* detourOperatorNew(size_t size)
 {   
-    inOperatorNew = true;
+    //inOperatorNew = true;
+    TlsSetValue(g_tlsOperatorNew, (LPVOID) 1);
+
     void* memptr = pOperatorNewOriginal(size);
     //std::bad_alloc is automatically handled
 
@@ -128,8 +139,8 @@ void* detourOperatorNew(size_t size)
     {
         tracker.trackAlloc(size, memptr);
     }
-
-    inOperatorNew = false;
+    //inOperatorNew = false;
+    TlsSetValue(g_tlsOperatorNew, (LPVOID) 0);
     return memptr;
 }
 
@@ -141,13 +152,18 @@ void detourOperatorDelete(void *ptr)
 
 void* detourOperatorNewArray(size_t size)
 {   
-    inOperatorNew = true;
+    //inOperatorNew = true;
+
+    TlsSetValue(g_tlsOperatorNew, (LPVOID) 1);
+
     void* memptr = pOperatorNewArrayOriginal(size);
     //std::bad_alloc is automatically handled
 
     tracker.trackAlloc(size, memptr);
 
-    inOperatorNew = false;
+    //inOperatorNew = false;
+
+    TlsSetValue(g_tlsOperatorNew, (LPVOID) 0);
     return memptr;
 }
 
@@ -158,15 +174,28 @@ void detourOperatorDeleteArray(void *ptr)
 }
 
 LPVOID detourHeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes)
-{
+{   
+
+    if (TlsGetValue(g_tlsHeapAlloc))
+    {   //reentrancy
+        return  pHeapAllocOriginal(hHeap, dwFlags, dwBytes);
+    }
+
+    TlsSetValue(g_tlsHeapAlloc, (LPVOID)1);
+
     void* memptr = pHeapAllocOriginal(hHeap, dwFlags, dwBytes);
+    //printf("HeapAlloc returned: %p\n", memptr);
     
-    if (memptr != NULL && !inMalloc && !inRealloc) // do not track heapAlloc triggered by malloc and realloc
+    if (memptr != NULL ) // do not track heapAlloc triggered by malloc and realloc
     {   
-        tracker.trackAlloc(dwBytes, memptr);
-        //printf("HeapAlloc tracked at: %p\n", hHeap);
+        if (tracker.trackingEnabled && !TlsGetValue(g_tlsMalloc) && !TlsGetValue(g_tlsRealloc))
+        {
+            tracker.trackAlloc(dwBytes, memptr);
+            //printf("HeapAlloc returned: %p\n", memptr);
+        }
     } 
 
+    TlsSetValue(g_tlsHeapAlloc, (LPVOID)0);
     return memptr;
 }
 
@@ -189,7 +218,7 @@ LPVOID detourHeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwByt
 
     if(newptr != NULL)
     {   
-        if (!inRealloc &&! inMalloc)
+        if (!TlsGetValue(g_tlsMalloc) && !TlsGetValue(g_tlsRealloc))
         {
             if (lpMem == NULL) //same as HeapAlloc
             {
@@ -207,7 +236,7 @@ LPVOID detourHeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwByt
         }
     }
     else  {
-        if (dwBytes == 0 && !inRealloc &&! inMalloc)
+        if (dwBytes == 0 && !TlsGetValue(g_tlsMalloc) && !TlsGetValue(g_tlsRealloc))
         {
             tracker.trackFree(lpMem);
         }
@@ -243,16 +272,20 @@ BOOL detourVirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType)
 
 VOID detourExitProcess(UINT uExitCode)
 {   
-    MH_STATUS status;
-
     tracker.trackingEnabled = false;
-    status = disableHooks();
-    status = removeHooks();
 
-    //tracker.resolveSymbols();
+    MH_STATUS status;
+ 
+    MH_DisableHook(MH_ALL_HOOKS);
+    MH_RemoveHook(MH_ALL_HOOKS);
+    status = uninitMinHook();
+
+    printf("exit process called, resolving symbols and reporting......\n");
+    tracker.resolveSymbols();
+    tracker.shutdown();
     //tracker.report();
-
-    pExitProcessOriginal(uExitCode);
+    //pExitProcessOriginal(uExitCode);
+    ExitProcess(uExitCode);
 }
 
 MH_STATUS hookMalloc()
@@ -526,24 +559,17 @@ MH_STATUS createHooks()
 
 MH_STATUS enableHooks()
 {
-    MH_STATUS status;
-    
-    status = hookHeapAlloc();
-    if(status != MH_OK) return status;
+    MH_STATUS status = MH_OK;
 
-    status = hookHeapFree();
-    if(status != MH_OK) return status;
 
-    status = hookHeapReAlloc();
-    if(status != MH_OK) return status;
 
     status = hookRealloc();
     if(status != MH_OK) return status;
 
-    status = hookVirtualAlloc();
+    //status = hookVirtualAlloc();
     if(status != MH_OK) return status;
 
-    status = hookVirtualFree();
+    //status = hookVirtualFree();
     if(status != MH_OK) return status;
     
     status = hookMalloc();
@@ -561,6 +587,15 @@ MH_STATUS enableHooks()
     status = hookOperatorNewArray();
     if(status != MH_OK) return status;
     status = hookOperatorDeleteArray();
+    if(status != MH_OK) return status;
+
+    status = hookHeapAlloc();
+    if(status != MH_OK) return status;
+
+    status = hookHeapFree();
+    if(status != MH_OK) return status;
+
+    //status = hookHeapReAlloc();
     if(status != MH_OK) return status;
 
     status = hookExitProcess();

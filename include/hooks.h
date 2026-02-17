@@ -7,6 +7,11 @@
 #include <stdlib.h>
 #include <winnt.h>
 
+extern DWORD g_tlsHeapAlloc;
+extern DWORD g_tlsMalloc;
+extern DWORD g_tlsRealloc;
+extern DWORD g_tlsOperatorNew;
+
 MH_STATUS initMinHook();
 MH_STATUS uninitMinHook();
 

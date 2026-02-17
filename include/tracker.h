@@ -23,6 +23,7 @@ public:
     void trackAlloc(size_t size, void* ptr);
     void trackFree(void* ptr);
 
+    void resolveStackTrace(AllocRecord &record);
     void resolveSymbols();
     void report();
 
@@ -40,6 +41,7 @@ private:
 //global tracker variable delaration 
 //extern allows to share global varibles accross all translation units
 extern MemTracker tracker; 
+
 
 
 

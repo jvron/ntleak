@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <MinHook.h>
 #include <corecrt.h>
 #include <cstring>
 #include <iomanip>
@@ -19,10 +20,29 @@
 MemTracker tracker; // global tracker variable definition
 
 void MemTracker::init()
-{   
+{    
+    allocMap.init();
     capacity = MAX_CAPACITY;
     allocCount = 0;
     symInit = false;
+
+    if (!symInit)
+    {
+        hProcess = GetCurrentProcess(); //unique identifier to current process
+
+        SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
+
+        if (!SymInitialize(hProcess, NULL, TRUE))
+        {
+            DWORD error = GetLastError();
+            std::cerr << "Symbol init failed: " << error << "\n";
+            return; //return if symInit fails
+        }
+        else {
+            //SymSetSearchPath(hProcess, ".;C:\\Dev\\ntleak");
+            symInit = true;
+        }
+    }
 }
 
 
@@ -35,6 +55,11 @@ void MemTracker::trackAlloc(size_t size, void* ptr)
         rec.size = size;
         rec.active = true;
         rec.frames = CaptureStackBackTrace(2, MAX_FRAMES, rec.callStack, NULL);
+
+        tracker.trackingEnabled = false;
+        tracker.resolveStackTrace(rec);
+        tracker.trackingEnabled = true;
+
         rec.status = USED;
     
         allocMap.insertItem(ptr, rec);
@@ -62,25 +87,63 @@ void MemTracker::trackFree(void *ptr)
     }
 }
 
+void MemTracker::resolveStackTrace(AllocRecord &record)
+{
+
+    for (int i = 0; i < record.frames; i++)
+    {
+        if (record.callStack[i] == nullptr)
+        {
+            continue;;
+        }
+
+        DWORD64 displacement = 0;
+        DWORD64 address = (DWORD64) record.callStack[i];
+        char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
+        
+        PSYMBOL_INFO pSymbol = (PSYMBOL_INFO) buffer;
+        
+        pSymbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+        pSymbol->MaxNameLen = MAX_SYM_NAME;
+            
+        DWORD64 base = SymGetModuleBase64(hProcess, address);
+
+        if (base == 0)
+        {
+            std::cout << "No module for address: " << std::hex << address << "\n";
+        }
+                        
+            if (SymFromAddr(hProcess, address, &displacement, pSymbol))
+            {
+                strncpy_s(record.resolvedStack[i], MAX_SYM_NAME, pSymbol->Name, _TRUNCATE);
+            }
+            else  {
+                DWORD error = GetLastError();
+                std::cout << "symFromAdrr returned error :" << error << "\n"; 
+            }
+
+            //get file and line info
+            IMAGEHLP_LINE64 Line;
+            PDWORD pDisplacement = 0;
+            Line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
+
+            if (SymGetLineFromAddr64(hProcess, address, pDisplacement, &Line))
+            {
+
+                record.lineNum[i] = Line.LineNumber;
+                strncpy_s(record.fileName[i], MAX_PATH, Line.FileName, _TRUNCATE); //copy file name 
+            }
+            else {
+                //if unavailable
+                record.lineNum[i] = 0; 
+                record.fileName[i][0] = '\0';
+            }
+    }
+
+}
+
 void MemTracker::resolveSymbols()
 {   
-    
-    if (!symInit)
-    {
-        hProcess = GetCurrentProcess(); //unique identifier to current process
-
-        if (!SymInitialize(hProcess, NULL, TRUE))
-        {
-            DWORD error = GetLastError();
-            std::cerr << "Symbol init failed: " << error << "\n";
-            return; //return if symInit fails
-        }
-        else {
-            SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
-            //SymSetSearchPath(hProcess, ".;C:\\Dev\\ntleak");
-            symInit = true;
-        }
-    }
 
     for (int i = 0; i < allocMap.hashGroups; i++)
     {   
@@ -92,7 +155,7 @@ void MemTracker::resolveSymbols()
         {   
             if (record.callStack[n] == nullptr) continue; 
             
-            DWORD displacement = 0;
+            DWORD64 displacement = 0;
             DWORD64 address = (DWORD64) record.callStack[n];
             char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];
         
@@ -101,8 +164,14 @@ void MemTracker::resolveSymbols()
             pSymbol->SizeOfStruct = sizeof(SYMBOL_INFO);
             pSymbol->MaxNameLen = MAX_SYM_NAME;
             
-            
-            if (SymFromAddr(hProcess, address, 0, pSymbol))
+            DWORD64 base = SymGetModuleBase64(hProcess, address);
+
+            if (base == 0)
+            {
+                std::cout << "No module for address: " << std::hex << address << "\n";
+            }
+                        
+            if (SymFromAddr(hProcess, address, &displacement, pSymbol))
             {
                 strncpy_s(record.resolvedStack[n], MAX_SYM_NAME, pSymbol->Name, _TRUNCATE);
             }
@@ -114,11 +183,10 @@ void MemTracker::resolveSymbols()
 
             //get file and line info
             IMAGEHLP_LINE64 Line;
-            
-
+            PDWORD pDisplacement = 0;
             Line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 
-            if (SymGetLineFromAddr64(hProcess, address, &displacement, &Line))
+            if (SymGetLineFromAddr64(hProcess, address, pDisplacement, &Line))
             {
 
                 record.lineNum[n] = Line.LineNumber;

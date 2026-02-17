@@ -56,12 +56,8 @@ void MemTracker::trackAlloc(size_t size, void* ptr)
         rec.active = true;
         rec.frames = CaptureStackBackTrace(2, MAX_FRAMES, rec.callStack, NULL);
 
-        tracker.trackingEnabled = false;
-        tracker.resolveStackTrace(rec);
-        tracker.trackingEnabled = true;
-
         rec.status = USED;
-    
+
         allocMap.insertItem(ptr, rec);
     
         allocCount++;
@@ -115,19 +111,20 @@ void MemTracker::resolveStackTrace(AllocRecord &record)
                         
             if (SymFromAddr(hProcess, address, &displacement, pSymbol))
             {
+            
                 strncpy_s(record.resolvedStack[i], MAX_SYM_NAME, pSymbol->Name, _TRUNCATE);
             }
-            else  {
+            else {
                 DWORD error = GetLastError();
-                std::cout << "symFromAdrr returned error :" << error << "\n"; 
+                printf("[DEBUG] symFromAddr failed for %p, error=%lu\n", record.callStack[i], error);
             }
 
             //get file and line info
             IMAGEHLP_LINE64 Line;
-            PDWORD pDisplacement = 0;
+            DWORD lineDisplacement = 0;
             Line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 
-            if (SymGetLineFromAddr64(hProcess, address, pDisplacement, &Line))
+            if (SymGetLineFromAddr64(hProcess, address, &lineDisplacement, &Line))
             {
 
                 record.lineNum[i] = Line.LineNumber;
@@ -138,6 +135,7 @@ void MemTracker::resolveStackTrace(AllocRecord &record)
                 record.lineNum[i] = 0; 
                 record.fileName[i][0] = '\0';
             }
+
     }
 
 }
@@ -183,10 +181,10 @@ void MemTracker::resolveSymbols()
 
             //get file and line info
             IMAGEHLP_LINE64 Line;
-            PDWORD pDisplacement = 0;
+            DWORD lineDisplacement = 0;
             Line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 
-            if (SymGetLineFromAddr64(hProcess, address, pDisplacement, &Line))
+            if (SymGetLineFromAddr64(hProcess, address, &lineDisplacement, &Line))
             {
 
                 record.lineNum[n] = Line.LineNumber;

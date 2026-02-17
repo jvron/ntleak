@@ -4,6 +4,7 @@
 #include <heapapi.h>
 #include <memoryapi.h>
 #include <minwindef.h>
+#include <processthreadsapi.h>
 #include <stdio.h>
 #include <winnt.h>
 
@@ -29,6 +30,11 @@ LPVOID (*pHeapReAllocOriginal) (HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_
 
 LPVOID (*pVirtualAllocOriginal) (LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect) = NULL;
 BOOL (*pVirtualFreeOriginal) (LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) = NULL; 
+
+VOID (*pExitProcessOriginal) (UINT uExitCode) = NULL;
+
+
+MH_STATUS removeHooks();
 
 //tls flags
 thread_local bool inMalloc = false;
@@ -235,6 +241,20 @@ BOOL detourVirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType)
     return result;
 }
 
+VOID detourExitProcess(UINT uExitCode)
+{   
+    MH_STATUS status;
+
+    tracker.trackingEnabled = false;
+    status = disableHooks();
+    status = removeHooks();
+
+    //tracker.resolveSymbols();
+    //tracker.report();
+
+    pExitProcessOriginal(uExitCode);
+}
+
 MH_STATUS hookMalloc()
 {
     MH_STATUS status;
@@ -395,6 +415,20 @@ MH_STATUS hookVirtualFree()
     return status;
 }
 
+MH_STATUS hookExitProcess()
+{
+    MH_STATUS status;
+
+    status = MH_EnableHook((void*)&ExitProcess);
+  
+    if (status != MH_OK)
+    {
+        return status;
+    }
+    
+    return status;
+}
+
 MH_STATUS createHooks()
 {
     MH_STATUS status;
@@ -481,6 +515,12 @@ MH_STATUS createHooks()
         return status;
     }
 
+    status = MH_CreateHook((void*)&ExitProcess, (void*) &detourExitProcess, reinterpret_cast<LPVOID*>(&pExitProcessOriginal));
+    if(status != MH_OK)
+    {
+        return status;
+    }
+
     return status;
 }
 
@@ -521,6 +561,9 @@ MH_STATUS enableHooks()
     status = hookOperatorNewArray();
     if(status != MH_OK) return status;
     status = hookOperatorDeleteArray();
+    if(status != MH_OK) return status;
+
+    status = hookExitProcess();
     if(status != MH_OK) return status;
 
     return status;
@@ -598,7 +641,7 @@ MH_STATUS removeHooks()
     if(status != MH_OK) return status;
 
     status = MH_RemoveHook((void*)(void (*)(void*)) &operator delete[]);
-    if(status != MH_OK) return status;
+      if(status != MH_OK) return status;
 
     return status;
 }

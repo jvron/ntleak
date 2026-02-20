@@ -15,6 +15,8 @@ extern DWORD g_tlsOperatorNew;
 MH_STATUS initMinHook();
 MH_STATUS uninitMinHook();
 
+void detourEntry(void);
+
 void* detourMalloc(size_t size);
 void detourFree(void* ptr);
 
@@ -33,7 +35,7 @@ LPVOID detourHeapRealloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwByt
 LPVOID detourVirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
 BOOL detourVirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType);
 
-
+MH_STATUS hookEntry();
 
 MH_STATUS hookHeapAlloc();
 MH_STATUS hookHeapFree();

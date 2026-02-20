@@ -1,4 +1,6 @@
 build
+build_release
+test
 .cache
 .vscode
 
@@ -8,6 +10,6 @@ Makefile
 CMakeLists.txt
 .clangd
 
-
+log.txt
 
 LICENSE

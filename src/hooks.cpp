@@ -1,7 +1,11 @@
+
+#include <windows.h>
 #include <MinHook.h>
+
 #include <cstddef>
 #include <cstdlib>
 #include <heapapi.h>
+#include <libloaderapi.h>
 #include <memoryapi.h>
 #include <minwindef.h>
 #include <processthreadsapi.h>
@@ -12,6 +16,9 @@
 #include "tracker.h"
 
 //function pointers that points to the original funtion. MinHook will store the target functions in these function pointers
+
+void (*pEntryOriginal)(void) = NULL;
+
 void* (*pMallocOriginal)(size_t size) = NULL;
 void (*pFreeOriginal)(void* ptr) = NULL;
 
@@ -22,6 +29,7 @@ void (*pOperatorDeleteOriginal)(void* ptr) = NULL;
 
 void* (*pOperatorNewArrayOriginal) (size_t size) = NULL;
 void (*pOperatorDeleteArrayOriginal)(void* ptr) = NULL;
+
 
 LPVOID (*pHeapAllocOriginal)(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) = NULL;
 BOOL (*pHeapFreeOriginal) (HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) = NULL;
@@ -61,6 +69,13 @@ MH_STATUS uninitMinHook()
     status = MH_Uninitialize();
     if(status != MH_OK) return status;
     return status;
+}
+
+void detourEntry()
+{   
+    tracker.trackingEnabled = false;
+
+    pEntryOriginal();
 }
 
 void* detourMalloc(size_t size)
@@ -280,13 +295,38 @@ VOID detourExitProcess(UINT uExitCode)
     MH_RemoveHook(MH_ALL_HOOKS);
     status = uninitMinHook();
 
-    printf("exit process called, resolving symbols and reporting......\n");
     tracker.resolveSymbols();
     tracker.shutdown();
-    //tracker.report();
-    //pExitProcessOriginal(uExitCode);
+    tracker.report();
+
+
+    //safe to call ExitProcess directly as hooks are removed
     ExitProcess(uExitCode);
 }
+
+MH_STATUS hookEntry()
+{
+    MH_STATUS status;
+
+    //entry
+    // get the handle of the current exe module
+    HMODULE hExe = GetModuleHandle(NULL);
+
+    PIMAGE_DOS_HEADER dosHeader = (PIMAGE_DOS_HEADER)hExe;
+
+    PIMAGE_NT_HEADERS64 ntHeader = (PIMAGE_NT_HEADERS64) ((BYTE*)hExe + dosHeader->e_lfanew);
+
+    void* entryPoint = (BYTE*) hExe + ntHeader->OptionalHeader.AddressOfEntryPoint;
+
+    status = MH_CreateHook(entryPoint,(void*)&detourEntry, reinterpret_cast<LPVOID*>(&pEntryOriginal));
+    if (status != MH_OK) return status;
+
+    status = MH_EnableHook(entryPoint);
+    if (status != MH_OK) return status;
+
+    return status;
+}
+
 
 MH_STATUS hookMalloc()
 {
@@ -560,8 +600,6 @@ MH_STATUS createHooks()
 MH_STATUS enableHooks()
 {
     MH_STATUS status = MH_OK;
-
-
 
     status = hookRealloc();
     if(status != MH_OK) return status;

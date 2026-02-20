@@ -1,13 +1,12 @@
 #pragma once
 
 #include <windows.h>
+#include <psapi.h>
 #include <minwindef.h>
 #include <cstddef>
 #include <cstring>
 
 #include "alloc_map.h"
-
-
 
 
 
@@ -24,6 +23,7 @@ public:
     void trackFree(void* ptr);
 
     void resolveStackTrace(AllocRecord &record);
+    bool isUserLeak(AllocRecord &record);
     void resolveSymbols();
     void report();
 
@@ -35,6 +35,10 @@ private:
 
     bool symInit;
     HANDLE hProcess;
+
+    HMODULE hExe;
+    uintptr_t base;
+    uintptr_t end;
 
 };
 

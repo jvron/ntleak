@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <psapi.h>
 #include <processthreadsapi.h>
 #include <MinHook.h>
 #include <corecrt.h>
@@ -26,30 +27,41 @@ void MemTracker::init()
     allocMap.init();
     capacity = MAX_CAPACITY;
     allocCount = 0;
-    symInit = false;
+    //symInit = false;
 
     g_tlsHeapAlloc = TlsAlloc();
     g_tlsMalloc = TlsAlloc();
     g_tlsRealloc = TlsAlloc();
     g_tlsOperatorNew = TlsAlloc();
 
-    if (!symInit)
+    hExe = GetModuleHandle(NULL);
+    hProcess = GetCurrentProcess(); //unique identifier to current process
+
+    MODULEINFO mi = {};
+    
+    if (!GetModuleInformation(hProcess, hExe, &mi, sizeof(mi)))
     {
-        hProcess = GetCurrentProcess(); //unique identifier to current process
-
-        SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
-
-        if (!SymInitialize(hProcess, NULL, TRUE))
-        {
-            DWORD error = GetLastError();
-            std::cerr << "Symbol init failed: " << error << "\n";
-            return; //return if symInit fails
-        }
-        else {
-            //SymSetSearchPath(hProcess, ".;C:\\Dev\\ntleak");
-            symInit = true;
-        }
+        DWORD err = GetLastError();
+        std::cerr << "GetModuleInformation failed: " << err << "\n";
+        return;
     }
+
+    base = (uintptr_t) mi.lpBaseOfDll;
+    end = base + mi.SizeOfImage;
+
+    SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
+
+    if (!SymInitialize(hProcess, NULL, TRUE))
+    {
+        DWORD error = GetLastError();
+        std::cerr << "Symbol init failed: " << error << "\n";
+        return; //return if symInit fails
+    }
+    else {
+        //SymSetSearchPath(hProcess, ".;C:\\Dev\\ntleak");
+        //symInit = true;
+    }
+    
 }
 
 
@@ -173,12 +185,14 @@ void MemTracker::resolveSymbols()
 
             if (base == 0)
             {
-                std::cout << "No module for address: " << std::hex << address << "\n";
+                //std::cout << "No module for address: " << std::hex << address << "\n";
+    
             }
                         
             if (SymFromAddr(hProcess, address, &displacement, pSymbol))
             {
                 strncpy_s(record.resolvedStack[n], MAX_SYM_NAME, pSymbol->Name, _TRUNCATE);
+
             }
             else  {
                 DWORD error = GetLastError();
@@ -222,6 +236,12 @@ void MemTracker::report()
 
         if (rec.status != USED || rec.active == false)
         {
+            continue;
+        }
+
+        if (!isUserLeak(rec))
+        {   
+            printf("not a user leak!\n");
             continue;
         }
 
@@ -277,7 +297,10 @@ void MemTracker::report()
     for (int i = 0; i < HashTable::hashGroups; i++)
     {
         AllocRecord& rec = allocMap.table[i];
+
         if (rec.status != USED || !rec.active) continue;
+
+        if (!isUserLeak(rec)) continue;
 
         std::cout << "LEAK #" << leakIndex++ << ":\n";
         std::cout << "  Address: 0x" << std::hex << reinterpret_cast<uintptr_t>(rec.address) << std::dec << "\n";
@@ -354,6 +377,63 @@ void MemTracker::report()
     if (mediumLeaks) std::cout << "WARNING:  " << mediumLeaks << " medium leak(s) detected.\n";
     if (smallLeaks)  std::cout << "INFO:     " << smallLeaks << " small leak(s) detected.\n";
     std::cout << std::string(60, '=') << "\n";
+}
+
+bool MemTracker::isUserLeak(AllocRecord &rec)
+{      
+    static const char* crtNoise[] = {
+        "mainCRTStartup",
+        "wmainCRTStartup", 
+        "WinMainCRTStartup",
+        "__scrt_common_main",
+        "__scrt_common_main_seh",
+        "_initterm_e",
+        "initterm_e",
+        "initterm",
+        "set_app_type",
+        "pre_c_initialization",
+        "pre_cpp_initialization",
+        "configure_narrow_argv",
+        nullptr
+    };
+
+    bool hasUserFrame = false;
+    
+
+    for(int i = 0; i < rec.frames; i++)
+    {   
+        uintptr_t addr = (uintptr_t) rec.callStack[i];
+
+        char * file = rec.fileName[i];
+
+        if (addr >= base && addr < end)
+        {   
+            for (int j = 0; crtNoise[j] != nullptr; j++)
+            {
+                if (strcmp(rec.resolvedStack[i], crtNoise[j]) == 0)
+                {
+                    return false;
+                }
+            }
+
+            if (file)
+            {
+                if ( strstr(file, "\\vctools\\crt\\") || strstr(file, "\\vcstartup\\"))
+                {
+                    return false;
+                }
+            }
+        }
+
+        else {
+            // continue if the stackframe is from outside the exe
+            continue;
+        }
+        
+        return true; 
+    }
+
+    return false;
 }
 
 void MemTracker::shutdown()

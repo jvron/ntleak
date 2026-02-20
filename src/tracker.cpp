@@ -109,7 +109,7 @@ void MemTracker::resolveStackTrace(AllocRecord &record)
     {
         if (record.callStack[i] == nullptr)
         {
-            continue;;
+            continue;
         }
 
         DWORD64 displacement = 0;
@@ -128,15 +128,14 @@ void MemTracker::resolveStackTrace(AllocRecord &record)
             std::cout << "No module for address: " << std::hex << address << "\n";
         }
                         
-            if (SymFromAddr(hProcess, address, &displacement, pSymbol))
-            {
-            
-                strncpy_s(record.resolvedStack[i], MAX_SYM_NAME, pSymbol->Name, _TRUNCATE);
-            }
-            else {
-                DWORD error = GetLastError();
-                printf("[DEBUG] symFromAddr failed for %p, error=%lu\n", record.callStack[i], error);
-            }
+        if (SymFromAddr(hProcess, address, &displacement, pSymbol))
+        {
+            strncpy_s(record.resolvedStack[i], MAX_SYM_NAME, pSymbol->Name, _TRUNCATE);
+        }
+        else {
+            DWORD error = GetLastError();
+            printf("[DEBUG] symFromAddr failed for %p, error=%lu\n", record.callStack[i], error);
+        }
 
             //get file and line info
             IMAGEHLP_LINE64 Line;
@@ -154,14 +153,12 @@ void MemTracker::resolveStackTrace(AllocRecord &record)
                 record.lineNum[i] = 0; 
                 record.fileName[i][0] = '\0';
             }
-
     }
 
 }
 
 void MemTracker::resolveSymbols()
 {   
-
     for (int i = 0; i < allocMap.hashGroups; i++)
     {   
         AllocRecord &record = allocMap.table[i];
@@ -186,7 +183,6 @@ void MemTracker::resolveSymbols()
             if (base == 0)
             {
                 //std::cout << "No module for address: " << std::hex << address << "\n";
-    
             }
                         
             if (SymFromAddr(hProcess, address, &displacement, pSymbol))
@@ -196,9 +192,8 @@ void MemTracker::resolveSymbols()
             }
             else  {
                 DWORD error = GetLastError();
-                std::cout << "symFromAdrr returned error :" << error << "\n"; 
+                std::cout << "symFromAdrr returned error: " << error << "\n"; 
             }
-
 
             //get file and line info
             IMAGEHLP_LINE64 Line;
@@ -217,6 +212,26 @@ void MemTracker::resolveSymbols()
                 record.lineNum[n] = 0; 
                 record.fileName[n][0] = '\0';
             }
+
+            //get module name
+
+            //get module handle
+            HMODULE hMod;
+            if (! GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCSTR)address, &hMod))
+            {
+                DWORD error = GetLastError();
+                std::cout << "GetModuleHandle returned error: " << error << "\n"; 
+            }
+
+            char moduleNameBuff[MAX_PATH];
+
+            if(GetModuleFileName(hMod, moduleNameBuff, sizeof(moduleNameBuff)))
+            {
+                strncpy_s(record.moduleName[n], MAX_PATH, moduleNameBuff, _TRUNCATE);
+            }
+            else {
+                record.moduleName[n][0] = '\0'; 
+            }
         }
     } 
 }
@@ -229,7 +244,7 @@ void MemTracker::report()
     size_t maxLeakSize = 0;
     void* maxLeakAddress = nullptr;
 
-    // First pass: gather stats
+    //gather stats
     for (int i = 0; i < HashTable::hashGroups; i++)
     {
         AllocRecord &rec = allocMap.table[i];
@@ -241,7 +256,6 @@ void MemTracker::report()
 
         if (!isUserLeak(rec))
         {   
-            printf("not a user leak!\n");
             continue;
         }
 
@@ -327,7 +341,7 @@ void MemTracker::report()
             // Filter system frames
             const char* systemPatterns[] = {
                 "RtlUserThreadStart","BaseThreadInitThunk","__scrt_",
-                "invoke_main","mainCRTStartup","calloc","realloc","HeapAlloc",
+                "invoke_main","mainCRTStartup","calloc","realloc","HeapAlloc", "_malloc_base",
                 "detour","operator","operator delete","std::"
             };
             bool isSystem = false;
@@ -396,10 +410,7 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
         "configure_narrow_argv",
         nullptr
     };
-
-    bool hasUserFrame = false;
     
-
     for(int i = 0; i < rec.frames; i++)
     {   
         uintptr_t addr = (uintptr_t) rec.callStack[i];
@@ -429,7 +440,8 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
             // continue if the stackframe is from outside the exe
             continue;
         }
-        
+
+        // return true only if there is no crtnoise and the allocation is not from vctools/vcstartup
         return true; 
     }
 

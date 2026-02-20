@@ -29,7 +29,7 @@ struct AllocRecord{
     char resolvedStack[MAX_FRAMES][MAX_SYM_NAME];
     DWORD lineNum[MAX_FRAMES];
     char fileName[MAX_FRAMES][MAX_PATH];
-
+    char moduleName[MAX_FRAMES][MAX_PATH];
     RecordStatus status; //for hash table - checks if the slot is used
 };
 

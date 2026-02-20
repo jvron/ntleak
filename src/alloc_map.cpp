@@ -1,14 +1,12 @@
-#include <errhandlingapi.h>
-#include <handleapi.h>
 #include <windows.h>
 #include <memoryapi.h>
 #include <winnt.h>
 #include "alloc_map.h"
 
-HashTable::HashTable()
+void HashTable::init()
 {   
     //create a page and name it
-    hMapFile = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, hashGroups * sizeof(AllocRecord), "Global\\ntleak_allocation_table");
+    hMapFile = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, hashGroups * sizeof(AllocRecord), "ntleak_allocation_table");
 
     if (hMapFile == NULL)
     {   

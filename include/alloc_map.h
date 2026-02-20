@@ -40,9 +40,10 @@ public:
     static const int hashGroups = MAX_CAPACITY;
     //table is a pointer that points to the first element of an array of AllocRecord objects. points to the first element of the block of memory
     AllocRecord *table = nullptr;
-    HashTable();
+    
     ~HashTable();
 
+    void init();
     bool isEmpty();
     int hashFunction(void* ptr);
     void insertItem(void* ptr, AllocRecord record);

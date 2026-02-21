@@ -1,7 +1,7 @@
-
 #include <windows.h>
+#include <cstring>
+#include <psapi.h>
 #include <MinHook.h>
-
 #include <cstddef>
 #include <cstdlib>
 #include <heapapi.h>
@@ -11,6 +11,9 @@
 #include <processthreadsapi.h>
 #include <stdio.h>
 #include <winnt.h>
+
+#include <shlwapi.h>
+#pragma comment(lib, "Shlwapi.lib")
 
 #include "hooks.h"
 #include "tracker.h"
@@ -41,14 +44,23 @@ BOOL (*pVirtualFreeOriginal) (LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType)
 
 VOID (*pExitProcessOriginal) (UINT uExitCode) = NULL;
 
+void* mallocAddr = NULL;
+void* freeAddr = NULL;
+void* reallocAddr = NULL;
 
-MH_STATUS removeHooks();
+void* heapAllocAddr = NULL;
+void* heapReAllocAddr = NULL;
+void* heapFreeAddr = NULL;
 
-//tls flags
-//thread_local bool inMalloc = false;
-//thread_local bool inRealloc = false;
-//thread_local bool inOperatorNew = false;
-//thread_local bool inHeapAlloc = false;
+void* virtualAllocAddr = NULL;
+void* virtualFreeAddr = NULL;
+
+void* opNewAddr = NULL;
+void* opDeleteAddr = NULL;
+void* opNewArrayAddr = NULL;
+void* opDeleteArrayAddr = NULL;
+
+
 
 //tls flags
 DWORD g_tlsHeapAlloc = TLS_OUT_OF_INDEXES;
@@ -332,7 +344,7 @@ MH_STATUS hookMalloc()
 {
     MH_STATUS status;
 
-    status = MH_EnableHook((void*)&malloc);
+    status = MH_EnableHook((void*)mallocAddr);
     if (status != MH_OK)
     {
         return status;
@@ -344,7 +356,7 @@ MH_STATUS hookFree()
 {
     MH_STATUS status;
 
-    status = MH_EnableHook((void*)&free);
+    status = MH_EnableHook((void*)freeAddr);
     if (status != MH_OK)
     {
         return status;
@@ -357,7 +369,7 @@ MH_STATUS hookRealloc()
 {
     MH_STATUS status;
 
-    status = MH_EnableHook((void*)&realloc);
+    status = MH_EnableHook((void*)reallocAddr);
     if (status != MH_OK)
     {
         return status;
@@ -371,7 +383,7 @@ MH_STATUS hookOperatorNew()
     MH_STATUS status;
     //(void* (*)(std::size_t)) &operator new;
 
-    status = MH_EnableHook((void*)(void* (*)(std::size_t)) &operator new);
+    status = MH_EnableHook((void*)opNewAddr);
     if (status != MH_OK)
     {
         return status;
@@ -385,7 +397,7 @@ MH_STATUS hookOperatorDelete()
 
     //(void*)(void (*)(void*)) &operator delete
 
-    status = MH_EnableHook((void*)(void*)(void (*)(void*)) &operator delete);
+    status = MH_EnableHook((void*)opDeleteAddr);
     if (status != MH_OK)
     {
         return status;
@@ -399,7 +411,7 @@ MH_STATUS hookOperatorNewArray()
     MH_STATUS status;
     //(void* (*)(std::size_t)) &operator new[]
 
-    status = MH_EnableHook((void*)(void* (*)(std::size_t)) &operator new[]);
+    status = MH_EnableHook((void*)opNewArrayAddr);
     if (status != MH_OK)
     {
         return status;
@@ -413,7 +425,7 @@ MH_STATUS hookOperatorDeleteArray()
 
     //(void*)(void (*)(void*)) &operator delete[]
 
-    status = MH_EnableHook((void*)(void*)(void (*)(void*)) &operator delete[]);
+    status = MH_EnableHook((void*)opDeleteArrayAddr);
     if (status != MH_OK)
     {
         return status;
@@ -426,7 +438,7 @@ MH_STATUS hookHeapAlloc()
 {
     MH_STATUS status;
 
-    status = MH_EnableHook((void*)&HeapAlloc);
+    status = MH_EnableHook((void*)heapAllocAddr);
     if (status != MH_OK)
     {
         return status;
@@ -439,7 +451,7 @@ MH_STATUS hookHeapReAlloc()
 {
     MH_STATUS status;
 
-    status = MH_EnableHook((void*)&HeapReAlloc);
+    status = MH_EnableHook((void*)heapReAllocAddr);
     if (status != MH_OK)
     {
         return status;
@@ -465,7 +477,7 @@ MH_STATUS hookHeapFree()
 {
     MH_STATUS status;
 
-    status = MH_EnableHook((void*)&HeapFree);
+    status = MH_EnableHook((void*)heapFreeAddr);
   
     if (status != MH_OK)
     {
@@ -503,70 +515,172 @@ MH_STATUS hookExitProcess()
 }
 
 MH_STATUS createHooks()
-{
-    MH_STATUS status;
+{   
+    MH_STATUS status = MH_UNKNOWN;
+
+    DWORD modulesBuffSize = 512;
+    DWORD cbNeeded = 0; //bytes needed
+
+    HMODULE *hModules = (HMODULE*) malloc(modulesBuffSize * sizeof(HMODULE));
+    if (hModules == NULL)
+    {   
+        printf("Failed to allocate memory for modules.\n");
+        return status;
+    }
+
+    if(EnumProcessModules(GetCurrentProcess(),hModules, modulesBuffSize * sizeof(HMODULE), &cbNeeded))
+    {   
+        if (cbNeeded > modulesBuffSize * sizeof(HMODULE))
+        {
+            modulesBuffSize = cbNeeded;
+
+            hModules = (HMODULE*) realloc(hModules, modulesBuffSize * sizeof(hModules));
+            if (hModules != NULL )
+            {
+                EnumProcessModules(GetCurrentProcess(),hModules, modulesBuffSize, &cbNeeded);
+            }
+        }
+    }
+    else {
+        printf("module enumeration failed");  
+    }
+
+    char moduleFilePath[MAX_PATH];
+    HMODULE hCRTModule = NULL;
+    HMODULE hVCRuntime = NULL;
+    HMODULE hKernel32 = NULL;
+
+    for (int i = 0; i < modulesBuffSize; i++)
+    {
+        GetModuleFileNameA(hModules[i], moduleFilePath, sizeof(moduleFilePath));
+
+        char* moduleName = PathFindFileNameA(moduleFilePath);
+
+        if (strcmp(moduleName, "ucrtbase.dll") == 0)
+        {
+            hCRTModule = hModules[i];
+            break;
+        }
+        else if (strcmp(moduleName, "ucrtbased.dll") == 0) 
+        {
+            hCRTModule = hModules[i];
+            break;
+        }
+        else if (strcmp(moduleName, "msvcrt.dll") == 0) 
+        {
+            hCRTModule = hModules[i];
+            break;
+        }
+        else if (strcmp(moduleName, "vcruntime140.dll") == 0) 
+        {
+            hVCRuntime = hModules[i];
+            break;
+        }
+        else if (strcmp(moduleName, "vcruntime140d.dll") == 0) 
+        {
+            hVCRuntime = hModules[i];
+            break;
+        }
+
+    }
+
+    if(hCRTModule == NULL)
+    {
+        mallocAddr = (void*)&malloc;
+        reallocAddr = (void*)&realloc;
+        freeAddr = (void*)&free;
+    }
+    else {
+        mallocAddr = (void*) GetProcAddress(hCRTModule, "malloc");
+        freeAddr = (void*)  GetProcAddress(hCRTModule, "free");
+        reallocAddr = (void*) GetProcAddress(hCRTModule, "realloc");
+    }
+
+    //kernel32.dll is guaranteed
+    hKernel32 = GetModuleHandleA("kernel32.dll");
+    if(hKernel32 == NULL)
+    {
+        heapAllocAddr = (void*)&HeapAlloc;
+        heapFreeAddr = (void*)&HeapFree;
+        heapReAllocAddr = (void*)&HeapReAlloc;
+
+        virtualAllocAddr = (void*)&VirtualAlloc;
+        virtualFreeAddr = (void*)&VirtualFree;
+    }
+    else {
+        heapAllocAddr = (void*) GetProcAddress(hKernel32, "HeapAlloc");
+        heapFreeAddr = (void*) GetProcAddress(hKernel32, "HeapFree");
+        heapReAllocAddr = (void*) GetProcAddress(hKernel32, "HeapReAlloc");
+        
+        virtualAllocAddr = (void*) GetProcAddress(hKernel32, "VirtualAlloc");
+        virtualFreeAddr = (void*) GetProcAddress(hKernel32, "VirtualFree");
+    }
+
+  
+    opNewAddr = (void*) (void* (*)(std::size_t)) &operator new;
+    opDeleteAddr = (void*)(void (*)(void*)) &operator delete;
+
+    opNewArrayAddr = (void*) (void* (*)(std::size_t)) &operator new[];
+    opDeleteArrayAddr = (void*)(void (*)(void*)) &operator delete[];
+
+    
+
+    
 
     //malloc
-    status = MH_CreateHook((void*)&malloc, (void*) &detourMalloc, reinterpret_cast<LPVOID*>(&pMallocOriginal));
+    status = MH_CreateHook((void*)mallocAddr, (void*) &detourMalloc, reinterpret_cast<LPVOID*>(&pMallocOriginal));
     if(status != MH_OK)
     {
         return status;
     }
     //free
-    status = MH_CreateHook((void*)&free, (void*) &detourFree, reinterpret_cast<LPVOID*>(&pFreeOriginal));
+    status = MH_CreateHook((void*)freeAddr, (void*) &detourFree, reinterpret_cast<LPVOID*>(&pFreeOriginal));
 
     if(status != MH_OK)
     {
         return status;
     }
     //realloc
-    status = MH_CreateHook((void*)&realloc, (void*) &detourRealloc, reinterpret_cast<LPVOID*>(&pReallocOriginal));
+    status = MH_CreateHook((void*)reallocAddr, (void*) &detourRealloc, reinterpret_cast<LPVOID*>(&pReallocOriginal));
 
     if(status != MH_OK)
     {
         return status;
     }
     //operator new
-    status = MH_CreateHook((void*)(void* (*)(std::size_t)) &operator new, (void*) &detourOperatorNew, reinterpret_cast<LPVOID*>(&pOperatorNewOriginal));
+    status = MH_CreateHook((void*)opNewAddr, (void*) &detourOperatorNew, reinterpret_cast<LPVOID*>(&pOperatorNewOriginal));
     if(status != MH_OK)
     {
         return status;
     }
     //operator delete
-    status = MH_CreateHook((void*)(void (*)(void*)) &operator delete, (void*) &detourOperatorDelete, reinterpret_cast<LPVOID*>(&pOperatorDeleteOriginal));
+    status = MH_CreateHook((void*)opDeleteAddr, (void*) &detourOperatorDelete, reinterpret_cast<LPVOID*>(&pOperatorDeleteOriginal));
 
     if(status != MH_OK)
     {
         return status;
     }
     //operator new[]
-    status = MH_CreateHook((void*)(void* (*)(std::size_t)) &operator new[], (void*) &detourOperatorNewArray, reinterpret_cast<LPVOID*>(&pOperatorNewArrayOriginal));
+    status = MH_CreateHook((void*)opNewArrayAddr, (void*) &detourOperatorNewArray, reinterpret_cast<LPVOID*>(&pOperatorNewArrayOriginal));
     if(status != MH_OK)
     {
         return status;
     }
     //operator delete[]
-    status = MH_CreateHook((void*)(void (*)(void*)) &operator delete[], (void*) &detourOperatorDeleteArray, reinterpret_cast<LPVOID*>(&pOperatorDeleteArrayOriginal));
+    status = MH_CreateHook((void*)opDeleteArrayAddr, (void*) &detourOperatorDeleteArray, reinterpret_cast<LPVOID*>(&pOperatorDeleteArrayOriginal));
 
     if(status != MH_OK)
     {
         return status;
     }
     //heapalloc
-    status = MH_CreateHook((void*)&HeapAlloc, (void*) &detourHeapAlloc, reinterpret_cast<LPVOID*>(&pHeapAllocOriginal));
+    status = MH_CreateHook((void*)heapAllocAddr, (void*) &detourHeapAlloc, reinterpret_cast<LPVOID*>(&pHeapAllocOriginal));
     if(status != MH_OK)
     {
         return status;
     }
     //heaprealloc
-    status = MH_CreateHook((void*)&HeapReAlloc, (void*) &detourHeapReAlloc, reinterpret_cast<LPVOID*>(&pHeapReAllocOriginal));
-
-    if(status != MH_OK)
-    {
-        return status;
-    }
-    //virtual alloc
-    status = MH_CreateHook((void*)&VirtualAlloc, (void*) &detourVirtualAlloc, reinterpret_cast<LPVOID*>(&pVirtualAllocOriginal));
+    status = MH_CreateHook((void*)heapReAllocAddr, (void*) &detourHeapReAlloc, reinterpret_cast<LPVOID*>(&pHeapReAllocOriginal));
 
     if(status != MH_OK)
     {
@@ -574,14 +688,22 @@ MH_STATUS createHooks()
     }
 
     //heapfree
-    status = MH_CreateHook((void*)&HeapFree, (void*) &detourHeapFree, reinterpret_cast<LPVOID*>(&pHeapFreeOriginal));
+    status = MH_CreateHook((void*)heapFreeAddr, (void*) &detourHeapFree, reinterpret_cast<LPVOID*>(&pHeapFreeOriginal));
+    if(status != MH_OK)
+    {
+        return status;
+    }
+
+    //virtual alloc
+    status = MH_CreateHook((void*)virtualAllocAddr, (void*) &detourVirtualAlloc, reinterpret_cast<LPVOID*>(&pVirtualAllocOriginal));
 
     if(status != MH_OK)
     {
         return status;
     }
+
     //virtualfree
-    status = MH_CreateHook((void*)&VirtualFree, (void*) &detourVirtualFree, reinterpret_cast<LPVOID*>(&pVirtualFreeOriginal));
+    status = MH_CreateHook((void*)virtualFreeAddr, (void*) &detourVirtualFree, reinterpret_cast<LPVOID*>(&pVirtualFreeOriginal));
 
     if(status != MH_OK)
     {
@@ -604,10 +726,10 @@ MH_STATUS enableHooks()
     status = hookRealloc();
     if(status != MH_OK) return status;
 
-    //status = hookVirtualAlloc();
+    status = hookVirtualAlloc();
     if(status != MH_OK) return status;
 
-    //status = hookVirtualFree();
+    status = hookVirtualFree();
     if(status != MH_OK) return status;
     
     status = hookMalloc();
@@ -633,7 +755,7 @@ MH_STATUS enableHooks()
     status = hookHeapFree();
     if(status != MH_OK) return status;
 
-    //status = hookHeapReAlloc();
+    status = hookHeapReAlloc();
     if(status != MH_OK) return status;
 
     status = hookExitProcess();
@@ -646,34 +768,43 @@ MH_STATUS disableHooks()
 {
     MH_STATUS status;
 
-    status = MH_DisableHook((void*)&malloc);
+    status = MH_DisableHook((void*)mallocAddr);
     if (status != MH_OK) return status;
 
-    status = MH_DisableHook((void*)&free);
+    status = MH_DisableHook((void*)freeAddr);
     if (status != MH_OK) return status;
 
-    status = MH_DisableHook((void*)&HeapAlloc);
+    status = MH_DisableHook((void*)heapAllocAddr);
     if (status != MH_OK) return status;
 
-    status = MH_DisableHook((void*)&HeapFree);
+    status = MH_DisableHook((void*)heapFreeAddr);
     if (status != MH_OK) return status;
 
-    status = MH_DisableHook((void*)&realloc);
+    status = MH_DisableHook((void*)reallocAddr);
     if(status != MH_OK) return status;
 
-    status = MH_DisableHook((void*)&HeapReAlloc);
+    status = MH_DisableHook((void*)heapReAllocAddr);
     if(status != MH_OK) return status;
 
-    status = MH_DisableHook((void*)(void* (*)(std::size_t)) &operator new);
+    status = MH_DisableHook((void*)opNewAddr);
     if(status != MH_OK) return status;
 
-    status = MH_DisableHook((void*)(void (*)(void*)) &operator delete);
+    status = MH_DisableHook((void*)opDeleteAddr);
     if(status != MH_OK) return status;
 
-    status = MH_DisableHook((void*)(void* (*)(std::size_t)) &operator new[]);
+    status = MH_DisableHook((void*)opNewArrayAddr);
     if(status != MH_OK) return status;
 
-    status = MH_DisableHook((void*)(void (*)(void*)) &operator delete[]);
+    status = MH_DisableHook((void*)opDeleteArrayAddr);
+    if(status != MH_OK) return status;
+
+    status = MH_DisableHook((void*)virtualAllocAddr);
+    if(status != MH_OK) return status;
+
+    status = MH_DisableHook((void*)virtualFreeAddr);
+    if(status != MH_OK) return status;
+
+    status = MH_DisableHook((void*)&ExitProcess);
     if(status != MH_OK) return status;
 
     return status;
@@ -683,38 +814,41 @@ MH_STATUS removeHooks()
 {   
     MH_STATUS status;
 
-    status = MH_RemoveHook((void*)&malloc);
+    status = MH_RemoveHook((void*)mallocAddr);
     if(status != MH_OK) return status;
 
-    status = MH_RemoveHook((void*)&free);
+    status = MH_RemoveHook((void*)freeAddr);
     if(status != MH_OK) return status;
 
-    status = MH_RemoveHook((void*)&HeapAlloc);
+    status = MH_RemoveHook((void*)heapAllocAddr);
     if(status != MH_OK) return status;
 
-    status = MH_RemoveHook((void*)&HeapFree);
+    status = MH_RemoveHook((void*)heapFreeAddr);
     if(status != MH_OK) return status;
 
-    status = MH_RemoveHook((void*)&VirtualAlloc);
+    status = MH_RemoveHook((void*)virtualAllocAddr);
     if(status != MH_OK) return status;
 
-    status = MH_RemoveHook((void*)&VirtualFree);
+    status = MH_RemoveHook((void*)virtualFreeAddr);
     if(status != MH_OK) return status;
 
-    status = MH_RemoveHook((void*)&realloc);
+    status = MH_RemoveHook((void*)reallocAddr);
     if(status != MH_OK) return status;
 
-    status = MH_RemoveHook((void*)(void* (*)(std::size_t)) &operator new);
+    status = MH_RemoveHook((void*)opNewAddr);
     if(status != MH_OK) return status;
 
-    status = MH_RemoveHook((void*)(void (*)(void*)) &operator delete);
+    status = MH_RemoveHook((void*)opDeleteAddr);
     if(status != MH_OK) return status;
 
-    status = MH_RemoveHook((void*)(void* (*)(std::size_t)) &operator new[]);
+    status = MH_RemoveHook((void*)opNewArrayAddr);
     if(status != MH_OK) return status;
 
-    status = MH_RemoveHook((void*)(void (*)(void*)) &operator delete[]);
-      if(status != MH_OK) return status;
+    status = MH_RemoveHook((void*)opDeleteArrayAddr);
+    if(status != MH_OK) return status;
+
+    status = MH_RemoveHook((void*)&ExitProcess);
+    if(status != MH_OK) return status;
 
     return status;
 }

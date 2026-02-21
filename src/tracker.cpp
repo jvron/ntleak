@@ -16,6 +16,9 @@
 #include <dbghelp.h>
 #pragma comment(lib, "dbghelp.lib")
 
+#include <shlwapi.h>
+#pragma comment(lib, "Shlwapi.lib")
+
 #include "tracker.h"
 #include "alloc_map.h"
 #include "hooks.h"
@@ -192,7 +195,7 @@ void MemTracker::resolveSymbols()
             }
             else  {
                 DWORD error = GetLastError();
-                std::cout << "symFromAdrr returned error: " << error << "\n"; 
+                //std::cout << "symFromAdrr returned error: " << error << "\n"; 
             }
 
             //get file and line info
@@ -326,7 +329,10 @@ void MemTracker::report()
         {
             if (rec.fileName[j][0] != '\0' && rec.lineNum[j] != 0)
             {
-                std::cout << "  Source:  " << rec.fileName[j] << ":" << rec.lineNum[j] << "\n";
+                std::cout << "  Source:  " 
+              << rec.moduleName[j] << " "  
+              << rec.fileName[j] << ":" 
+              << rec.lineNum[j] << "\n";
                 foundSource = true;
             }
         }
@@ -341,8 +347,8 @@ void MemTracker::report()
             // Filter system frames
             const char* systemPatterns[] = {
                 "RtlUserThreadStart","BaseThreadInitThunk","__scrt_",
-                "invoke_main","mainCRTStartup","calloc","realloc","HeapAlloc", "_malloc_base",
-                "detour","operator","operator delete","std::"
+                "invoke_main","mainCRTStartup","calloc","realloc","HeapAlloc",
+                "detour","operator","operator delete","std::", "_calloc_base", "_malloc_base"
             };
             bool isSystem = false;
             for (const char* p : systemPatterns)
@@ -351,14 +357,17 @@ void MemTracker::report()
             if (!isSystem)
             {
                 std::cout << "    [" << j << "] " << sym;
-                
-                // Show file/line if available for this frame
-                if (rec.fileName[j][0] != '\0' && rec.lineNum[j] != 0)
+                // Show module/file/line if available
+                if (rec.moduleName[j][0] != '\0' || rec.fileName[j][0] != '\0')
                 {
-                    std::cout << " (" << rec.fileName[j] << ":" << rec.lineNum[j] << ")";
+                    std::cout << " (";
+                    if (rec.moduleName[j][0] != '\0') std::cout << rec.moduleName[j] << " ";
+                    if (rec.fileName[j][0] != '\0')   std::cout << rec.fileName[j];
+                    if (rec.lineNum[j] != 0)          std::cout << ":" << rec.lineNum[j];
+                    std::cout << ")";
                 }
                 std::cout << "\n";
-                
+
                 hasUserFrames = true;
             }
         }
@@ -395,6 +404,7 @@ void MemTracker::report()
 
 bool MemTracker::isUserLeak(AllocRecord &rec)
 {      
+
     static const char* crtNoise[] = {
         "mainCRTStartup",
         "wmainCRTStartup", 
@@ -404,24 +414,74 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
         "_initterm_e",
         "initterm_e",
         "initterm",
+        "_initterm",
+
+        "__acrt_initialize_multibyte",
+        "internal_get_ptd_head_slow",
+        "create_environment<char>",
+        "__acrt_lowio_create_handle_array",
+        "__acrt_allocate_buffer_for_argv",
+        "__acrt_stdio_begin_temporary_buffering_nolock",
+
         "set_app_type",
         "pre_c_initialization",
         "pre_cpp_initialization",
         "configure_narrow_argv",
+
         nullptr
     };
+
+    static const char* systemModules[] = {
+        "kernel32.dll",
+        "ntdll.dll",
+        "ucrtbase.dll",
+        "ucrtbased.dll",
+        "vcruntime140.dll",
+        "KERNELBASE.dll",
+        "VCRUNTIME140D.dll",
+        "msvcrt.dll",
+        "USER32.dll",
+        "ntleak.dll",
+        "SDL2.dll",
+        "ig9icd64.dll",
+        "igc64.dll",
+        
+        nullptr
+
+    };
+
+    static const char* userStackFrame[] = {
+        "main",
+        "wmain",
+        "wWinMain",
+        "DllMain",
+        nullptr
+    };
+
+    int framesChecked = 0;
     
     for(int i = 0; i < rec.frames; i++)
     {   
         uintptr_t addr = (uintptr_t) rec.callStack[i];
 
-        char * file = rec.fileName[i];
+        char* file = rec.fileName[i];
+        char* stackFrame = rec.resolvedStack[i];
+        char* module = rec.moduleName[i];
+        char* moduleName = PathFindFileNameA(module);
+
+        //printf("stack frame: %s\n", stackFrame);
+        //printf("module name: %s\n", module);
 
         if (addr >= base && addr < end)
         {   
+            //printf("user module name: %s\n", module);
+            //printf("file name: %s\n", file);
+            //printf("stack frame: %s\n", stackFrame);
+            
+            //modules belong to the exe - no need to check for system modules
             for (int j = 0; crtNoise[j] != nullptr; j++)
             {
-                if (strcmp(rec.resolvedStack[i], crtNoise[j]) == 0)
+                if (strcmp(stackFrame, crtNoise[j]) == 0)
                 {
                     return false;
                 }
@@ -434,17 +494,43 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
                     return false;
                 }
             }
+            //printf("passed stack frame: %s\n", stackFrame);
+            framesChecked++;
         }
 
-        else {
+        else { 
+            //filter system modules
+            
+            for (int j = 0; systemModules[j] != nullptr; j++)
+            {
+                if (_stricmp(moduleName, systemModules[j]) == 0)
+                {
+                    return false;
+                }
+            }
+
+            printf("passed system module name : %s\n", module);
+
+            framesChecked++;
             // continue if the stackframe is from outside the exe
-            continue;
         }
 
         // return true only if there is no crtnoise and the allocation is not from vctools/vcstartup
-        return true; 
-    }
+        for (int j = 0; userStackFrame[j] != nullptr; j++)
+        {
+            if (strcmp(stackFrame, userStackFrame[j]) == 0)
+            {
+                return true;
+            }
+        }
 
+        if (framesChecked > rec.frames)
+        {
+            return true;
+        }
+    
+    }
+    
     return false;
 }
 

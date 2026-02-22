@@ -286,69 +286,88 @@ void MemTracker::report()
         return oss.str();
     };
 
-    // Print summary
-    std::cout << "\n" << std::string(60, '=') << "\n";
-    std::cout << "               MEMORY LEAK REPORT\n";
-    std::cout << std::string(60, '=') << "\n\n";
-    std::cout << "SUMMARY:\n" << std::string(40, '-') << "\n";
-    std::cout << "Total Leaks Detected: " << leakCount << "\n";
-    std::cout << "Total Memory Leaked:  " << formatBytes(totalLeaked) << "\n";
+    // Header
+    std::cout << "\n";
+    std::cout << "==========================================================\n";
+    std::cout << "           M E M O R Y   L E A K   R E P O R T\n";
+    std::cout << "==========================================================\n\n";
+
+    // Summary
+    std::cout << "+- SUMMARY -----------------------------------------------+\n";
+    std::cout << "|  Leaks Found   : " << std::left << std::setw(40) << leakCount                << "|\n";
+    std::cout << "|  Total Leaked  : " << std::left << std::setw(40) << formatBytes(totalLeaked)  << "|\n";
     if (leakCount > 0)
     {
-        std::cout << "Average Leak Size:    " << formatBytes(totalLeaked / leakCount) << "\n";
-        std::cout << "Largest Leak:         " << formatBytes(maxLeakSize) 
-                  << " at 0x" << std::hex << reinterpret_cast<uintptr_t>(maxLeakAddress) << std::dec << "\n";
+        std::cout << "|  Average Size  : " << std::left << std::setw(40) << formatBytes(totalLeaked / leakCount) << "|\n";
+
+        std::ostringstream largestOss;
+        largestOss << formatBytes(maxLeakSize)
+                   << "  @ 0x" << std::hex << reinterpret_cast<uintptr_t>(maxLeakAddress) << std::dec;
+        std::cout << "|  Largest Leak  : " << std::left << std::setw(40) << largestOss.str() << "|\n";
+
+        std::cout << "|                                                         |\n";
+        std::cout << "|  Breakdown     :  ";
+        if (largeLeaks)  std::cout << largeLeaks  << " large  ";
+        if (mediumLeaks) std::cout << mediumLeaks << " medium  ";
+        if (smallLeaks)  std::cout << smallLeaks  << " small  ";
+        std::cout << "\n";
     }
-    std::cout << "\n";
+    std::cout << "+---------------------------------------------------------+\n\n";
 
     if (leakCount == 0)
     {
-        std::cout << "No memory leaks detected.\n";
-        std::cout << std::string(60, '=') << "\n";
+        std::cout << "  >> No memory leaks detected.\n\n";
         return;
     }
 
-    // Print detailed info
-    std::cout << "DETAILED LEAK INFORMATION:\n" << std::string(60, '-') << "\n\n";
+    // Per-leak detail
+    std::cout << "+- LEAK DETAILS ------------------------------------------+\n\n";
+
     int leakIndex = 1;
     for (int i = 0; i < HashTable::hashGroups; i++)
     {
         AllocRecord& rec = allocMap.table[i];
 
         if (rec.status != USED || !rec.active) continue;
-
         if (!isUserLeak(rec)) continue;
 
-        std::cout << "LEAK #" << leakIndex++ << ":\n";
-        std::cout << "  Address: 0x" << std::hex << reinterpret_cast<uintptr_t>(rec.address) << std::dec << "\n";
-        std::cout << "  Size:    " << formatBytes(rec.size) << " (" << rec.size << " bytes)\n";
+        std::cout << "  +- Leak #" << leakIndex++ << " " << std::string(50, '-') << "\n";
 
-        // Find first valid source location across all frames
-        bool foundSource = false;
-        for (USHORT j = 0; j < rec.frames && !foundSource; j++)
+        std::cout << "  |  Address  :  0x"
+                  << std::hex << reinterpret_cast<uintptr_t>(rec.address) << std::dec << "\n";
+        std::cout << "  |  Size     :  " << formatBytes(rec.size)
+                  << "  (" << rec.size << " bytes)\n";
+
+        for (USHORT j = 0; j < rec.frames; j++)
         {
-            if (rec.fileName[j][0] != '\0' && rec.lineNum[j] != 0)
-            {
-                std::cout << "  Source:  " 
-              << rec.moduleName[j] << " "  
-              << rec.fileName[j] << ":" 
-              << rec.lineNum[j] << "\n";
-                foundSource = true;
-            }
+            if (rec.fileName[j][0] == '\0' || rec.lineNum[j] == 0)
+                continue;
+
+            if (strstr(rec.fileName[j], "\\include\\thread") ||
+                strstr(rec.fileName[j], "\\vctools\\crt\\")   ||
+                strstr(rec.fileName[j], "\\vcstartup\\")      ||
+                strstr(rec.fileName[j], "Program Files"))
+                continue;
+
+            std::cout << "  |  Module   :  " << rec.moduleName[j] << "\n";
+            std::cout << "  |  File     :  " << rec.fileName[j]   << "\n";
+            std::cout << "  |  Line     :  " << rec.lineNum[j]    << "\n";
+            break;
         }
 
-        std::cout << "  Call Stack:\n";
+        std::cout << "  |\n";
+        std::cout << "  |  Call Stack:\n";
+
         bool hasUserFrames = false;
         for (USHORT j = 0; j < rec.frames; j++)
         {
             const char* sym = rec.resolvedStack[j];
             if (!sym || sym[0] == '\0') continue;
 
-            // Filter system frames
             const char* systemPatterns[] = {
                 "RtlUserThreadStart","BaseThreadInitThunk","__scrt_",
                 "invoke_main","mainCRTStartup","calloc","realloc","HeapAlloc",
-                "detour","operator","operator delete","std::", "_calloc_base", "_malloc_base"
+                "detour","operator","operator delete","std::", "register_onexit_function", 
             };
             bool isSystem = false;
             for (const char* p : systemPatterns)
@@ -356,50 +375,54 @@ void MemTracker::report()
 
             if (!isSystem)
             {
-                std::cout << "    [" << j << "] " << sym;
-                // Show module/file/line if available
-                if (rec.moduleName[j][0] != '\0' || rec.fileName[j][0] != '\0')
+                std::cout << "  |    [" << std::setw(2) << j << "]  " << sym;
+
+                bool hasLocation = rec.fileName[j][0] != '\0' || rec.lineNum[j] != 0;
+                if (hasLocation)
                 {
-                    std::cout << " (";
-                    if (rec.moduleName[j][0] != '\0') std::cout << rec.moduleName[j] << " ";
-                    if (rec.fileName[j][0] != '\0')   std::cout << rec.fileName[j];
-                    if (rec.lineNum[j] != 0)          std::cout << ":" << rec.lineNum[j];
+                    std::cout << "  (";
+                    if (rec.fileName[j][0] != '\0')
+                    {
+                        // Just the filename, not the full path
+                        const char* slash = strrchr(rec.fileName[j], '\\');
+                        std::cout << (slash ? slash + 1 : rec.fileName[j]);
+                    }
+                    if (rec.lineNum[j] != 0)
+                        std::cout << ":" << rec.lineNum[j];
                     std::cout << ")";
                 }
-                std::cout << "\n";
 
+                std::cout << "\n";
                 hasUserFrames = true;
             }
         }
 
         if (!hasUserFrames)
         {
-            std::cout << "    [No user frames, showing full stack]\n";
+            std::cout << "  |    (no user frames -- showing full stack)\n";
             for (USHORT j = 0; j < rec.frames; j++)
             {
                 if (rec.resolvedStack[j][0] != '\0')
                 {
-                    std::cout << "    [" << j << "] " << rec.resolvedStack[j];
-                    
-                    // Show file/line if available
+                    std::cout << "  |    [" << std::setw(2) << j << "]  " << rec.resolvedStack[j] << "\n";
                     if (rec.fileName[j][0] != '\0' && rec.lineNum[j] != 0)
                     {
-                        std::cout << " (" << rec.fileName[j] << ":" << rec.lineNum[j] << ")";
+                        std::cout << "  |          file    >>  " << rec.fileName[j] << "\n";
+                        std::cout << "  |          line    >>  " << rec.lineNum[j]  << "\n";
                     }
-                    std::cout << "\n";
                 }
             }
         }
 
-        std::cout << std::string(40, '-') << "\n\n";
+        std::cout << "  +" << std::string(57, '-') << "\n\n";
     }
 
     // Recommendations
-    std::cout << "RECOMMENDATIONS:\n" << std::string(60, '-') << "\n";
-    if (largeLeaks)  std::cout << "CRITICAL: " << largeLeaks << " large leak(s) detected.\n";
-    if (mediumLeaks) std::cout << "WARNING:  " << mediumLeaks << " medium leak(s) detected.\n";
-    if (smallLeaks)  std::cout << "INFO:     " << smallLeaks << " small leak(s) detected.\n";
-    std::cout << std::string(60, '=') << "\n";
+    std::cout << "+- RECOMMENDATIONS ---------------------------------------+\n";
+    if (largeLeaks)  std::cout << "|  [CRITICAL]  " << largeLeaks  << " large leak(s)  -- investigate immediately\n";
+    if (mediumLeaks) std::cout << "|  [WARNING ]  " << mediumLeaks << " medium leak(s) -- should be addressed\n";
+    if (smallLeaks)  std::cout << "|  [INFO    ]  " << smallLeaks  << " small leak(s)  -- low priority\n";
+    std::cout << "+---------------------------------------------------------+\n\n";
 }
 
 bool MemTracker::isUserLeak(AllocRecord &rec)
@@ -415,7 +438,7 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
         "initterm_e",
         "initterm",
         "_initterm",
-
+        "fwrite",
         "__acrt_initialize_multibyte",
         "internal_get_ptd_head_slow",
         "create_environment<char>",
@@ -434,12 +457,11 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
     static const char* systemModules[] = {
         "kernel32.dll",
         "ntdll.dll",
-        "ucrtbase.dll",
-        "ucrtbased.dll",
         "vcruntime140.dll",
         "KERNELBASE.dll",
-        "VCRUNTIME140D.dll",
+     
         "msvcrt.dll",
+        "dbghelp.dll",
         "USER32.dll",
         "ntleak.dll",
         "SDL2.dll",
@@ -450,6 +472,7 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
 
     };
 
+    //   "VCRUNTIME140D.dll",    "
     static const char* userStackFrame[] = {
         "main",
         "wmain",
@@ -462,6 +485,7 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
     
     for(int i = 0; i < rec.frames; i++)
     {   
+        
         uintptr_t addr = (uintptr_t) rec.callStack[i];
 
         char* file = rec.fileName[i];
@@ -499,23 +523,29 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
         }
 
         else { 
+
+            if(_stricmp(stackFrame, "fwrite") == 0)
+            {
+                return false;
+            }
+
             //filter system modules
-            
+            framesChecked++;
             for (int j = 0; systemModules[j] != nullptr; j++)
             {
                 if (_stricmp(moduleName, systemModules[j]) == 0)
                 {
+                    //if(_stricmp(moduleName, "ucrtbase.dll") != 0 && _stricmp(moduleName, "ucrtbased.dll") != 0)
+                    
+                        //return false;
                     return false;
-                }
+                }   
             }
-
-            printf("passed system module name : %s\n", module);
-
-            framesChecked++;
+            //printf("passed system module name : %s\n", module);
             // continue if the stackframe is from outside the exe
         }
 
-        // return true only if there is no crtnoise and the allocation is not from vctools/vcstartup
+        // return true for user stackframes
         for (int j = 0; userStackFrame[j] != nullptr; j++)
         {
             if (strcmp(stackFrame, userStackFrame[j]) == 0)
@@ -524,14 +554,13 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
             }
         }
 
-        if (framesChecked > rec.frames)
+        if (framesChecked > rec.frames - 2)
         {
             return true;
         }
-    
     }
     
-    return false;
+    return true;
 }
 
 void MemTracker::shutdown()

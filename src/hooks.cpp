@@ -1,4 +1,6 @@
+#include <cstdio>
 #include <windows.h>
+#include <winternl.h> 
 #include <cstring>
 #include <psapi.h>
 #include <MinHook.h>
@@ -24,8 +26,7 @@ void (*pEntryOriginal)(void) = NULL;
 
 void* (*pMallocOriginal)(size_t size) = NULL;
 void (*pFreeOriginal)(void* ptr) = NULL;
-
-void* (*pReallocOriginal)(void* memptr, size_t size) = NULL;
+void* (*pReallocOriginal)(void* memptr, size_t size) = NULL; 
 
 void* (*pOperatorNewOriginal) (size_t size) = NULL;
 void (*pOperatorDeleteOriginal)(void* ptr) = NULL;
@@ -42,11 +43,15 @@ LPVOID (*pHeapReAllocOriginal) (HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_
 LPVOID (*pVirtualAllocOriginal) (LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect) = NULL;
 BOOL (*pVirtualFreeOriginal) (LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType) = NULL; 
 
+PVOID (*pRtlAllocateHeapOriginal)(PVOID HeapHandle, ULONG Flags, SIZE_T Size) = NULL;
+BOOLEAN (*pRtlFreeHeapOriginal)(PVOID HeapHandle, ULONG Flags, PVOID HeapBase) = NULL;
+
 VOID (*pExitProcessOriginal) (UINT uExitCode) = NULL;
 
 void* mallocAddr = NULL;
 void* freeAddr = NULL;
 void* reallocAddr = NULL;
+
 
 void* heapAllocAddr = NULL;
 void* heapReAllocAddr = NULL;
@@ -60,7 +65,8 @@ void* opDeleteAddr = NULL;
 void* opNewArrayAddr = NULL;
 void* opDeleteArrayAddr = NULL;
 
-
+void* rtlAllocateHeapAddr = NULL;
+void* rtlFreeHeapAddr = NULL;
 
 //tls flags
 DWORD g_tlsHeapAlloc = TLS_OUT_OF_INDEXES;
@@ -69,7 +75,7 @@ DWORD g_tlsRealloc = TLS_OUT_OF_INDEXES;
 DWORD g_tlsOperatorNew = TLS_OUT_OF_INDEXES;
 
 MH_STATUS initMinHook()
-{
+{   
     MH_STATUS status;
     status = MH_Initialize();
     if(status != MH_OK) return status;
@@ -95,13 +101,13 @@ void* detourMalloc(size_t size)
     TlsSetValue(g_tlsMalloc, (LPVOID) 1);
 
     void *memptr = pMallocOriginal(size);
-
-    if (memptr != NULL && !TlsGetValue(g_tlsOperatorNew))
+    //&& !TlsGetValue(g_tlsOperatorNew))
+    if (memptr != NULL )
     {
         tracker.trackAlloc(size, memptr);
     };
 
-    //printf("malloc returned: %p\n", memptr);
+    //printf("malloc returned: %p for size: %zu\n", memptr, size);
     
     TlsSetValue(g_tlsMalloc, (LPVOID) 0);
     return memptr;
@@ -154,10 +160,11 @@ void* detourRealloc(void *memptr, size_t size)
     return newptr;
 }
 
+
 void* detourOperatorNew(size_t size)
 {   
     //inOperatorNew = true;
-    TlsSetValue(g_tlsOperatorNew, (LPVOID) 1);
+    TlsSetValue(g_tlsOperatorNew, (LPVOID) 0);
 
     void* memptr = pOperatorNewOriginal(size);
     //std::bad_alloc is automatically handled
@@ -181,7 +188,7 @@ void* detourOperatorNewArray(size_t size)
 {   
     //inOperatorNew = true;
 
-    TlsSetValue(g_tlsOperatorNew, (LPVOID) 1);
+    TlsSetValue(g_tlsOperatorNew, (LPVOID) 0);
 
     void* memptr = pOperatorNewArrayOriginal(size);
     //std::bad_alloc is automatically handled
@@ -221,7 +228,7 @@ LPVOID detourHeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes)
             //printf("HeapAlloc returned: %p\n", memptr);
         }
     } 
-
+    //printf("RtlAllocateHeap: %p size=%zu \n",memptr, dwBytes);
     TlsSetValue(g_tlsHeapAlloc, (LPVOID)0);
     return memptr;
 }
@@ -233,6 +240,7 @@ BOOL detourHeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem)
     if (result != 0)
     {
         tracker.trackFree(lpMem);
+        //printf("heapFree tracking: %p\n", lpMem);
     }
 
     return result;
@@ -297,6 +305,33 @@ BOOL detourVirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType)
     return result;
 }
 
+PVOID detourRtlAllocateHeap(PVOID HeapHandle, ULONG Flags, SIZE_T Size)
+{
+    void* memptr = pRtlAllocateHeapOriginal(HeapHandle, Flags, Size);
+
+    if (memptr != NULL)
+    {   
+        if (!TlsGetValue(g_tlsHeapAlloc) && !TlsGetValue(g_tlsMalloc) && !TlsGetValue(g_tlsRealloc))
+        {
+            tracker.trackAlloc(Size, memptr);
+        }
+    }
+
+    return memptr;
+}
+
+BOOLEAN detourRtlFreeHeap(PVOID HeapHandle, ULONG Flags, PVOID HeapBase)
+{
+    BOOLEAN result = pRtlFreeHeapOriginal(HeapHandle, Flags, HeapBase);
+
+    if (result != 0)
+    {
+        tracker.trackFree(HeapBase);
+    }
+
+    return result;
+}
+
 VOID detourExitProcess(UINT uExitCode)
 {   
     tracker.trackingEnabled = false;
@@ -345,6 +380,7 @@ MH_STATUS hookMalloc()
     MH_STATUS status;
 
     status = MH_EnableHook((void*)mallocAddr);
+
     if (status != MH_OK)
     {
         return status;
@@ -377,6 +413,7 @@ MH_STATUS hookRealloc()
 
     return status;
 }
+
 
 MH_STATUS hookOperatorNew()
 {
@@ -500,6 +537,28 @@ MH_STATUS hookVirtualFree()
     return status;
 }
 
+MH_STATUS hookRtlAllocateHeap()
+{
+    MH_STATUS status;
+    status = MH_EnableHook((void*)rtlAllocateHeapAddr);
+    if (status != MH_OK)
+    {
+        return status;
+    }
+    return status;
+}
+
+MH_STATUS hookRtlFreeHeap()
+{
+    MH_STATUS status;
+    status = MH_EnableHook((void*)rtlFreeHeapAddr);
+    if (status != MH_OK)
+    {
+        return status;
+    }
+    return status;
+}
+
 MH_STATUS hookExitProcess()
 {
     MH_STATUS status;
@@ -547,8 +606,10 @@ MH_STATUS createHooks()
 
     char moduleFilePath[MAX_PATH];
     HMODULE hCRTModule = NULL;
+    const char* crtModuleName = NULL;
     HMODULE hVCRuntime = NULL;
     HMODULE hKernel32 = NULL;
+    HMODULE hNtdll = NULL;
 
     for (int i = 0; i < modulesBuffSize; i++)
     {
@@ -559,29 +620,33 @@ MH_STATUS createHooks()
         if (strcmp(moduleName, "ucrtbase.dll") == 0)
         {
             hCRTModule = hModules[i];
+            crtModuleName = "ucrtbase.dll";
             break;
         }
         else if (strcmp(moduleName, "ucrtbased.dll") == 0) 
         {
             hCRTModule = hModules[i];
+            crtModuleName = "ucrtbased.dll";
             break;
         }
         else if (strcmp(moduleName, "msvcrt.dll") == 0) 
         {
             hCRTModule = hModules[i];
+            crtModuleName = "msvcrt.dll";
             break;
         }
         else if (strcmp(moduleName, "vcruntime140.dll") == 0) 
         {
             hVCRuntime = hModules[i];
+            crtModuleName = "vcruntime140.dll";
             break;
         }
         else if (strcmp(moduleName, "vcruntime140d.dll") == 0) 
         {
             hVCRuntime = hModules[i];
+            crtModuleName = "vcruntime140d.dll";
             break;
         }
-
     }
 
     if(hCRTModule == NULL)
@@ -589,6 +654,7 @@ MH_STATUS createHooks()
         mallocAddr = (void*)&malloc;
         reallocAddr = (void*)&realloc;
         freeAddr = (void*)&free;
+       
     }
     else {
         mallocAddr = (void*) GetProcAddress(hCRTModule, "malloc");
@@ -616,17 +682,25 @@ MH_STATUS createHooks()
         virtualFreeAddr = (void*) GetProcAddress(hKernel32, "VirtualFree");
     }
 
+    hNtdll = GetModuleHandleA("ntdll.dll");
+
+    if (hNtdll == NULL)
+    {
+        //rtlAllocateHeapAddr = (void*)&RtlAllocateHeap;
+        //rtlFreeHeapAddr = (void*)&RtlFreeHeap;
+    }
+    else {
+        rtlAllocateHeapAddr = (void*) GetProcAddress(hNtdll, "RtlAllocateHeap");
+        rtlFreeHeapAddr = (void*) GetProcAddress(hNtdll, "RtlFreeHeap");
+    }
+
   
     opNewAddr = (void*) (void* (*)(std::size_t)) &operator new;
     opDeleteAddr = (void*)(void (*)(void*)) &operator delete;
-
     opNewArrayAddr = (void*) (void* (*)(std::size_t)) &operator new[];
     opDeleteArrayAddr = (void*)(void (*)(void*)) &operator delete[];
-
-    
-
-    
-
+ 
+    printf("%s\n", crtModuleName);
     //malloc
     status = MH_CreateHook((void*)mallocAddr, (void*) &detourMalloc, reinterpret_cast<LPVOID*>(&pMallocOriginal));
     if(status != MH_OK)
@@ -674,11 +748,13 @@ MH_STATUS createHooks()
         return status;
     }
     //heapalloc
+    
     status = MH_CreateHook((void*)heapAllocAddr, (void*) &detourHeapAlloc, reinterpret_cast<LPVOID*>(&pHeapAllocOriginal));
     if(status != MH_OK)
     {
         return status;
     }
+   
     //heaprealloc
     status = MH_CreateHook((void*)heapReAllocAddr, (void*) &detourHeapReAlloc, reinterpret_cast<LPVOID*>(&pHeapReAllocOriginal));
 
@@ -709,6 +785,22 @@ MH_STATUS createHooks()
     {
         return status;
     }
+
+    //rtlallocateheap
+    /*
+    status = MH_CreateHook((void*)rtlAllocateHeapAddr, (void*)&detourRtlAllocateHeap, reinterpret_cast<LPVOID*>(&pRtlAllocateHeapOriginal));
+    if(status != MH_OK)
+    {   
+        printf("%s\n",MH_StatusToString(status));
+        //return status;
+    }
+
+    status = MH_CreateHook((void*)rtlFreeHeapAddr, (void*)&detourRtlFreeHeap, reinterpret_cast<LPVOID*>(&pRtlFreeHeapOriginal));
+    if(status != MH_OK)
+    {
+        return status;
+    }
+    */
 
     status = MH_CreateHook((void*)&ExitProcess, (void*) &detourExitProcess, reinterpret_cast<LPVOID*>(&pExitProcessOriginal));
     if(status != MH_OK)
@@ -758,6 +850,12 @@ MH_STATUS enableHooks()
     status = hookHeapReAlloc();
     if(status != MH_OK) return status;
 
+    //status = hookRtlAllocateHeap();
+    if(status != MH_OK) return status;
+
+    //status = hookRtlFreeHeap();
+    if(status != MH_OK) return status;
+
     status = hookExitProcess();
     if(status != MH_OK) return status;
 
@@ -804,6 +902,12 @@ MH_STATUS disableHooks()
     status = MH_DisableHook((void*)virtualFreeAddr);
     if(status != MH_OK) return status;
 
+    //status = MH_DisableHook((void*)rtlAllocateHeapAddr);
+    if(status != MH_OK) return status;
+    
+    //status = MH_DisableHook((void*)rtlFreeHeapAddr);
+    if(status != MH_OK) return status;
+
     status = MH_DisableHook((void*)&ExitProcess);
     if(status != MH_OK) return status;
 
@@ -845,6 +949,12 @@ MH_STATUS removeHooks()
     if(status != MH_OK) return status;
 
     status = MH_RemoveHook((void*)opDeleteArrayAddr);
+    if(status != MH_OK) return status;
+
+    //status = MH_RemoveHook((void*)rtlAllocateHeapAddr);
+    if(status != MH_OK) return status;
+
+    //status = MH_RemoveHook((void*)rtlFreeHeapAddr);
     if(status != MH_OK) return status;
 
     status = MH_RemoveHook((void*)&ExitProcess);

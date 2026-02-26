@@ -98,10 +98,14 @@ void detourEntry()
 
 void* detourMalloc(size_t size)
 {   
+    if (TlsGetValue(g_tlsMalloc))
+    {
+        return pMallocOriginal(size);
+    }
     TlsSetValue(g_tlsMalloc, (LPVOID) 1);
 
     void *memptr = pMallocOriginal(size);
-    //&& !TlsGetValue(g_tlsOperatorNew))
+   //&& !TlsGetValue(g_tlsOperatorNew)
     if (memptr != NULL )
     {
         tracker.trackAlloc(size, memptr);
@@ -163,8 +167,12 @@ void* detourRealloc(void *memptr, size_t size)
 
 void* detourOperatorNew(size_t size)
 {   
-    //inOperatorNew = true;
-    TlsSetValue(g_tlsOperatorNew, (LPVOID) 0);
+    if (TlsGetValue(g_tlsOperatorNew))
+    {
+        return  pOperatorNewOriginal(size);
+    }
+    
+    TlsSetValue(g_tlsOperatorNew, (LPVOID) 1);
 
     void* memptr = pOperatorNewOriginal(size);
     //std::bad_alloc is automatically handled
@@ -173,7 +181,8 @@ void* detourOperatorNew(size_t size)
     {
         tracker.trackAlloc(size, memptr);
     }
-    //inOperatorNew = false;
+    printf("operatorNew: %p size=%zu\n", memptr, size);
+    
     TlsSetValue(g_tlsOperatorNew, (LPVOID) 0);
     return memptr;
 }
@@ -186,16 +195,17 @@ void detourOperatorDelete(void *ptr)
 
 void* detourOperatorNewArray(size_t size)
 {   
-    //inOperatorNew = true;
+    if (TlsGetValue(g_tlsOperatorNew))
+    {
+        return  pOperatorNewArrayOriginal(size);
+    }
 
-    TlsSetValue(g_tlsOperatorNew, (LPVOID) 0);
+    TlsSetValue(g_tlsOperatorNew, (LPVOID) 1);
 
     void* memptr = pOperatorNewArrayOriginal(size);
     //std::bad_alloc is automatically handled
 
     tracker.trackAlloc(size, memptr);
-
-    //inOperatorNew = false;
 
     TlsSetValue(g_tlsOperatorNew, (LPVOID) 0);
     return memptr;
@@ -593,25 +603,26 @@ MH_STATUS createHooks()
         {
             modulesBuffSize = cbNeeded;
 
-            hModules = (HMODULE*) realloc(hModules, modulesBuffSize * sizeof(hModules));
+            hModules = (HMODULE*) realloc(hModules, modulesBuffSize * sizeof(HMODULE));
             if (hModules != NULL )
             {
-                EnumProcessModules(GetCurrentProcess(),hModules, modulesBuffSize, &cbNeeded);
+                EnumProcessModules(GetCurrentProcess(),hModules, modulesBuffSize * sizeof(HMODULE), &cbNeeded);
             }
         }
     }
     else {
         printf("module enumeration failed");  
     }
-
+    int moduleCount = cbNeeded / sizeof(HMODULE);
     char moduleFilePath[MAX_PATH];
     HMODULE hCRTModule = NULL;
     const char* crtModuleName = NULL;
+    const char* vcrtModuleName = NULL;
     HMODULE hVCRuntime = NULL;
     HMODULE hKernel32 = NULL;
     HMODULE hNtdll = NULL;
 
-    for (int i = 0; i < modulesBuffSize; i++)
+    for (int i = 0; i < moduleCount; i++)
     {
         GetModuleFileNameA(hModules[i], moduleFilePath, sizeof(moduleFilePath));
 
@@ -633,18 +644,6 @@ MH_STATUS createHooks()
         {
             hCRTModule = hModules[i];
             crtModuleName = "msvcrt.dll";
-            break;
-        }
-        else if (strcmp(moduleName, "vcruntime140.dll") == 0) 
-        {
-            hVCRuntime = hModules[i];
-            crtModuleName = "vcruntime140.dll";
-            break;
-        }
-        else if (strcmp(moduleName, "vcruntime140d.dll") == 0) 
-        {
-            hVCRuntime = hModules[i];
-            crtModuleName = "vcruntime140d.dll";
             break;
         }
     }
@@ -694,13 +693,22 @@ MH_STATUS createHooks()
         rtlFreeHeapAddr = (void*) GetProcAddress(hNtdll, "RtlFreeHeap");
     }
 
-  
-    opNewAddr = (void*) (void* (*)(std::size_t)) &operator new;
-    opDeleteAddr = (void*)(void (*)(void*)) &operator delete;
-    opNewArrayAddr = (void*) (void* (*)(std::size_t)) &operator new[];
-    opDeleteArrayAddr = (void*)(void (*)(void*)) &operator delete[];
- 
-    printf("%s\n", crtModuleName);
+/*
+    if (hVCRuntime == NULL)
+    {
+        opNewAddr = (void*) (void* (*)(std::size_t)) &operator new;
+        opDeleteAddr = (void*)(void (*)(void*)) &operator delete;
+        opNewArrayAddr = (void*) (void* (*)(std::size_t)) &operator new[];
+        opDeleteArrayAddr = (void*)(void (*)(void*)) &operator delete[];
+    }
+    else {
+        opNewAddr = (void*) GetProcAddress(hVCRuntime, "??2@YAPEAX_K@Z");
+        opDeleteAddr = (void*) GetProcAddress(hVCRuntime, "??3@YAXPEAX@Z");
+        opNewArrayAddr = (void*) GetProcAddress(hVCRuntime, "??_U@YAPEAX_K@Z");
+        opDeleteArrayAddr = (void*) GetProcAddress(hVCRuntime, "??_V@YAXPEAX@Z");
+    }
+*/
+
     //malloc
     status = MH_CreateHook((void*)mallocAddr, (void*) &detourMalloc, reinterpret_cast<LPVOID*>(&pMallocOriginal));
     if(status != MH_OK)
@@ -721,6 +729,7 @@ MH_STATUS createHooks()
     {
         return status;
     }
+/*
     //operator new
     status = MH_CreateHook((void*)opNewAddr, (void*) &detourOperatorNew, reinterpret_cast<LPVOID*>(&pOperatorNewOriginal));
     if(status != MH_OK)
@@ -747,6 +756,7 @@ MH_STATUS createHooks()
     {
         return status;
     }
+*/
     //heapalloc
     
     status = MH_CreateHook((void*)heapAllocAddr, (void*) &detourHeapAlloc, reinterpret_cast<LPVOID*>(&pHeapAllocOriginal));
@@ -801,7 +811,6 @@ MH_STATUS createHooks()
         return status;
     }
     */
-
     status = MH_CreateHook((void*)&ExitProcess, (void*) &detourExitProcess, reinterpret_cast<LPVOID*>(&pExitProcessOriginal));
     if(status != MH_OK)
     {
@@ -813,7 +822,7 @@ MH_STATUS createHooks()
 
 MH_STATUS enableHooks()
 {
-    MH_STATUS status = MH_OK;
+    MH_STATUS status = MH_UNKNOWN;
 
     status = hookRealloc();
     if(status != MH_OK) return status;
@@ -829,7 +838,7 @@ MH_STATUS enableHooks()
 
     status = hookFree();
     if(status != MH_OK) return status;
-
+/*
     status = hookOperatorNew();
     if(status != MH_OK) return status;
 
@@ -840,7 +849,7 @@ MH_STATUS enableHooks()
     if(status != MH_OK) return status;
     status = hookOperatorDeleteArray();
     if(status != MH_OK) return status;
-
+*/
     status = hookHeapAlloc();
     if(status != MH_OK) return status;
 
@@ -864,7 +873,7 @@ MH_STATUS enableHooks()
 
 MH_STATUS disableHooks()
 {
-    MH_STATUS status;
+    MH_STATUS status = MH_UNKNOWN;
 
     status = MH_DisableHook((void*)mallocAddr);
     if (status != MH_OK) return status;
@@ -883,7 +892,7 @@ MH_STATUS disableHooks()
 
     status = MH_DisableHook((void*)heapReAllocAddr);
     if(status != MH_OK) return status;
-
+/*
     status = MH_DisableHook((void*)opNewAddr);
     if(status != MH_OK) return status;
 
@@ -896,16 +905,16 @@ MH_STATUS disableHooks()
     status = MH_DisableHook((void*)opDeleteArrayAddr);
     if(status != MH_OK) return status;
 
+    status = MH_DisableHook((void*)rtlAllocateHeapAddr);
+    if(status != MH_OK) return status;
+    
+    status = MH_DisableHook((void*)rtlFreeHeapAddr);
+    if(status != MH_OK) return status;
+*/
     status = MH_DisableHook((void*)virtualAllocAddr);
     if(status != MH_OK) return status;
 
     status = MH_DisableHook((void*)virtualFreeAddr);
-    if(status != MH_OK) return status;
-
-    //status = MH_DisableHook((void*)rtlAllocateHeapAddr);
-    if(status != MH_OK) return status;
-    
-    //status = MH_DisableHook((void*)rtlFreeHeapAddr);
     if(status != MH_OK) return status;
 
     status = MH_DisableHook((void*)&ExitProcess);
@@ -916,7 +925,7 @@ MH_STATUS disableHooks()
 
 MH_STATUS removeHooks()
 {   
-    MH_STATUS status;
+    MH_STATUS status = MH_UNKNOWN;
 
     status = MH_RemoveHook((void*)mallocAddr);
     if(status != MH_OK) return status;
@@ -938,7 +947,7 @@ MH_STATUS removeHooks()
 
     status = MH_RemoveHook((void*)reallocAddr);
     if(status != MH_OK) return status;
-
+/*
     status = MH_RemoveHook((void*)opNewAddr);
     if(status != MH_OK) return status;
 
@@ -951,12 +960,12 @@ MH_STATUS removeHooks()
     status = MH_RemoveHook((void*)opDeleteArrayAddr);
     if(status != MH_OK) return status;
 
-    //status = MH_RemoveHook((void*)rtlAllocateHeapAddr);
+    status = MH_RemoveHook((void*)rtlAllocateHeapAddr);
     if(status != MH_OK) return status;
 
-    //status = MH_RemoveHook((void*)rtlFreeHeapAddr);
+    status = MH_RemoveHook((void*)rtlFreeHeapAddr);
     if(status != MH_OK) return status;
-
+*/
     status = MH_RemoveHook((void*)&ExitProcess);
     if(status != MH_OK) return status;
 

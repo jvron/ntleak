@@ -39,7 +39,6 @@ void HashTable::init()
     }
 
     */
-    
 }
 
 HashTable::~HashTable()
@@ -56,11 +55,10 @@ HashTable::~HashTable()
         std::cerr << " Table VirtualFree failed\n";
         return;
     }
-        */
+    */
 
     UnmapViewOfFile(table);
     CloseHandle(hMapFile);
-
     table = nullptr;
 }
 

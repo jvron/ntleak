@@ -1,5 +1,4 @@
 #include <windows.h>
-#include <errhandlingapi.h>
 #include <memoryapi.h>
 #include <debugapi.h>
 #include <minwinbase.h>
@@ -13,10 +12,9 @@
 #include <MinHook.h>
 #include <cstddef>
 #include <handleapi.h>
-#include <iostream>
-#include <stdlib.h>
 #include <stdio.h>
 #include <winnt.h>
+#include <string>
 
 #include "tracker.h"
 #include "alloc_map.h"
@@ -51,7 +49,6 @@ int main(int argc, char* argv[])
         return -1;
     }
 
-
     PROCESS_INFORMATION procInfo;
     STARTUPINFOA startInfo;
 
@@ -70,7 +67,7 @@ int main(int argc, char* argv[])
 
     if (result) 
     {   
-        std::cout << "Child launched. Waiting...\n";
+        //std::cout << "Child launched. Waiting...\n";
         DWORD procId = procInfo.dwProcessId;
         HANDLE hProc = procInfo.hProcess;
         
@@ -102,7 +99,6 @@ int main(int argc, char* argv[])
         WaitForSingleObject(hRThread, INFINITE);
         printf("LoadLibrary finished\n");
 
-
         //wait for hooks to initialize
         WaitForSingleObject(hReady, INFINITE);
         CloseHandle(hReady);
@@ -117,11 +113,11 @@ int main(int argc, char* argv[])
                 
         //resume thread
         ResumeThread(procInfo.hThread);
-        printf("Thread resumed\n");
+        //printf("Thread resumed\n");
         
         //wait for process to exit
         WaitForSingleObject(hProc, INFINITE);
-        printf("child process exited \n");
+        printf("Child process exited \n");
 
         DWORD exitCode = 0;
         GetExitCodeProcess(hProc, &exitCode);
@@ -152,8 +148,7 @@ int main(int argc, char* argv[])
         CloseHandle(procInfo.hThread);
     } 
     else {
-
-        std::cerr << "Failed to launch process. Error: " << GetLastError() << "\n";
+        printf("Failed to launch process. Error: %lu\n", GetLastError());
     }
 
     return 0;

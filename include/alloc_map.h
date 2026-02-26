@@ -9,7 +9,7 @@
 
 #define MAX_FRAMES 64
 //#define MAX_SYM_NAME 256
-#define MAX_CAPACITY 10000
+#define MAX_CAPACITY 20000
 
 enum RecordStatus {
 

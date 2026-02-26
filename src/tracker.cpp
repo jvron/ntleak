@@ -195,6 +195,7 @@ void MemTracker::resolveSymbols()
             }
             else  {
                 DWORD error = GetLastError();
+                strncpy_s(record.resolvedStack[n], MAX_SYM_NAME, "\0" , _TRUNCATE);
                 //std::cout << "symFromAdrr returned error: " << error << "\n"; 
             }
 
@@ -223,7 +224,7 @@ void MemTracker::resolveSymbols()
             if (! GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (LPCSTR)address, &hMod))
             {
                 DWORD error = GetLastError();
-                std::cout << "GetModuleHandle returned error: " << error << "\n"; 
+                //std::cout << "Tracker: GetModuleHandle returned error: " << error << "\n"; 
             }
 
             char moduleNameBuff[MAX_PATH];
@@ -309,7 +310,7 @@ void MemTracker::report()
         std::cout << "|  Breakdown     :  ";
         if (largeLeaks)  std::cout << largeLeaks  << " large  ";
         if (mediumLeaks) std::cout << mediumLeaks << " medium  ";
-        if (smallLeaks)  std::cout << smallLeaks  << " small  ";
+        if (smallLeaks)  std::cout << smallLeaks  << " small  "  << "                    |";
         std::cout << "\n";
     }
     std::cout << "+---------------------------------------------------------+\n\n";
@@ -341,13 +342,19 @@ void MemTracker::report()
         for (USHORT j = 0; j < rec.frames; j++)
         {
             if (rec.fileName[j][0] == '\0' || rec.lineNum[j] == 0)
+            {
                 continue;
+            }
 
             if (strstr(rec.fileName[j], "\\include\\thread") ||
                 strstr(rec.fileName[j], "\\vctools\\crt\\")   ||
                 strstr(rec.fileName[j], "\\vcstartup\\")      ||
-                strstr(rec.fileName[j], "Program Files"))
+                strstr(rec.fileName[j], "Program Files") ||
+                strstr(rec.fileName[j], "minkernel\\crts\\")) 
+            {
+
                 continue;
+            }
 
             std::cout << "  |  Module   :  " << rec.moduleName[j] << "\n";
             std::cout << "  |  File     :  " << rec.fileName[j]   << "\n";
@@ -365,9 +372,9 @@ void MemTracker::report()
             if (!sym || sym[0] == '\0') continue;
 
             const char* systemPatterns[] = {
-                "RtlUserThreadStart","BaseThreadInitThunk","__scrt_",
-                "invoke_main","mainCRTStartup","calloc","realloc","HeapAlloc",
-                "detour","operator","operator delete","std::", "register_onexit_function", 
+                "malloc_base","malloc_dbg","RtlUserThreadStart","BaseThreadInitThunk","__scrt_",
+                "invoke_main","mainCRTStartup","calloc","realloc","HeapAlloc", "mbsdup_dbg", "heap_alloc_dbg", "heap_alloc_dbg_internal", "malloc", "thread_start", "_strdup_dbg", "_wcsdup_dbg",
+                "detour","operator new","operator delete","std::", "register_onexit_function", "beginthreadex", "wcsrchr"
             };
             bool isSystem = false;
             for (const char* p : systemPatterns)
@@ -375,7 +382,7 @@ void MemTracker::report()
 
             if (!isSystem)
             {
-                std::cout << "  |    [" << std::setw(2) << j << "]  " << sym;
+                std::cout << "  |    [" << std::setw(1) << j << "]  " << sym;
 
                 bool hasLocation = rec.fileName[j][0] != '\0' || rec.lineNum[j] != 0;
                 if (hasLocation)
@@ -414,19 +421,13 @@ void MemTracker::report()
             }
         }
 
-        std::cout << "  +" << std::string(57, '-') << "\n\n";
+        std::cout << "  +" << std::string(60, '-') << "\n\n";
     }
-
-    // Recommendations
-    std::cout << "+- RECOMMENDATIONS ---------------------------------------+\n";
-    if (largeLeaks)  std::cout << "|  [CRITICAL]  " << largeLeaks  << " large leak(s)  -- investigate immediately\n";
-    if (mediumLeaks) std::cout << "|  [WARNING ]  " << mediumLeaks << " medium leak(s) -- should be addressed\n";
-    if (smallLeaks)  std::cout << "|  [INFO    ]  " << smallLeaks  << " small leak(s)  -- low priority\n";
-    std::cout << "+---------------------------------------------------------+\n\n";
 }
 
 bool MemTracker::isUserLeak(AllocRecord &rec)
 {      
+    //filtering is a bit messy :/
 
     static const char* crtNoise[] = {
         "mainCRTStartup",
@@ -439,40 +440,144 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
         "initterm",
         "_initterm",
         "fwrite",
+        "printf",
+        "_vfprintf_l",
+        "unlock_locales",
+        "towlower_l",
+        "VerifierSetRuntimeFlags",
+        "set_se_translator",
         "__acrt_initialize_multibyte",
-        "internal_get_ptd_head_slow",
+        "beginthreadex",
+        "_beginthreadex",
+        "register_onexit_function",
         "create_environment<char>",
-        "__acrt_lowio_create_handle_array",
         "__acrt_allocate_buffer_for_argv",
         "__acrt_stdio_begin_temporary_buffering_nolock",
-
         "set_app_type",
         "pre_c_initialization",
         "pre_cpp_initialization",
         "configure_narrow_argv",
+        "__acrt_get_begin_thread_init_policy",
+        "_FC_Query_System",
+        "AppPolicyGetWindowingModel",
+        "AppPolicyGetThreadInitializationType",
 
         nullptr
     };
 
+    static const char* systemNoise[] = {
+        // ntdll
+        "RtlUserThreadStart",
+        "RtlInitializeExceptionChain",
+        "RtlClearBits",
+        "TpReleaseWork",
+        "TpWaitForWork",
+        "TppWorkpExecuteCallback",
+        "TppWorkerThread",
+        "LdrInitializeThunk",
+        "LdrLoadDll",
+        "LdrpLoadDll",
+        "LdrpInitialize",
+        "NtdllDefWindowProc_A",
+        "RtlActivateActivationContextUnsafeFast",
+
+        // kernel32
+        "BaseThreadInitThunk",
+        "BaseProcessStart",
+        "LoadLibraryA",
+        "LoadLibraryW",
+        "LoadLibraryExA",
+        "LoadLibraryExW",
+        "FreeLibrary",
+        "CreateThread",
+
+        nullptr
+    };
+
+    static const char* externalNoise[] = {
+    //crt
+    "fwrite",
+    "mainCRTStartup",
+    "set_app_type",
+    "initterm_e",
+    "o___stdio_common_vswprintf",
+    "towlower_l",
+    "GetEnvironmentStringsW",
+    "configure_narrow_argv",
+    "get_wpgmptr",
+
+
+    // ntdll loader
+    "LdrLoadDll",
+    "LdrControlFlowGuardEnforced",
+    "LdrpLoadDll",
+    "LdrGetDllHandleEx",
+    "LdrGetProcedureAddress",
+    "LdrGetProcedureAddressForCaller",
+    "LdrInitializeThunk",
+    "LdrpInitialize",
+    "LdrpInitializeProcess",
+    "LdrpRunInitializeRoutines",
+    "LdrpCallInitRoutine",
+    "LdrpLoadDllInternal",
+    "LdrResolveDelayLoadedAPI",
+
+    // ntdll string/table internals
+    "RtlAnsiStringToUnicodeString",
+    "RtlAddressInSectionTable",
+    "RtlFlsSetValue",
+    "RtlReleaseSRWLockExclusive",
+    "RtlAddGrowableFunctionTable",
+    "RtlUTF8ToUnicodeN",
+    "RtlAppendUnicodeStringToString",
+    "RtlInsertElementGenericTableFullAvl",
+    "RtlInsertElementGenericTableAvl",
+    "RtlDeleteElementGenericTableAvlEx",
+    "RtlEncodeRemotePointer",
+    "RtlRaiseException",
+    "RtlReleaseSRWLockShared",
+    "RtlDeactivateActivationContextUnsafeFast",
+
+    // thread noise
+    "_beginthreadex",
+    "beginthreadex",
+    "TpSetWaitEx",
+    "TpReleaseWork",
+    "TpWaitForWork",
+    "TppWorkpExecuteCallback",
+    "TppWorkerThread",
+
+    // ETW 
+    "EtwEventWriteNoRegistration",
+    "EtwEventWrite",
+    "EtwEventRegister",
+
+    //windows stuff
+    "ClearCommError",
+    "ArmFeatureUsageSubscriberFlushNotification",
+    "AppPolicyGetWindowingModel",
+
+    //kernelbase
+    "SetUnhandledExceptionFilter",
+
+    // locale / time
+    "unlock_locales",
+    "setsystime",
+
+    nullptr
+};
+
     static const char* systemModules[] = {
-        "kernel32.dll",
-        "ntdll.dll",
-        "vcruntime140.dll",
-        "KERNELBASE.dll",
-     
-        "msvcrt.dll",
         "dbghelp.dll",
         "USER32.dll",
-        "ntleak.dll",
         "SDL2.dll",
         "ig9icd64.dll",
         "igc64.dll",
         
         nullptr
-
     };
 
-    //   "VCRUNTIME140D.dll",    "
+ 
     static const char* userStackFrame[] = {
         "main",
         "wmain",
@@ -496,6 +601,23 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
         //printf("stack frame: %s\n", stackFrame);
         //printf("module name: %s\n", module);
 
+        bool isNoise = false;
+        for (int j = 0; systemNoise[j] != nullptr; j++)
+        {
+            if (strcmp(stackFrame, systemNoise[j]) == 0)
+            {
+                isNoise = true;
+                break;
+            }
+        }
+
+        if (isNoise) continue;
+
+        if(_stricmp(moduleName, "ntleak.dll") == 0)
+        {
+            return false;
+        }
+
         if (addr >= base && addr < end)
         {   
             //printf("user module name: %s\n", module);
@@ -510,51 +632,60 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
                     return false;
                 }
             }
-
-            if (file)
-            {
-                if ( strstr(file, "\\vctools\\crt\\") || strstr(file, "\\vcstartup\\"))
-                {
-                    return false;
-                }
-            }
+            
             //printf("passed stack frame: %s\n", stackFrame);
             framesChecked++;
         }
 
         else { 
 
-            if(_stricmp(stackFrame, "fwrite") == 0)
+            if (file)
             {
-                return false;
+                if (strstr(file, "win_policies.cpp") || strstr(file, "stdio.cpp"))
+                {
+                    return false;
+                }
             }
 
+            for (int j = 0; externalNoise[j] != nullptr; j++)
+            {
+                if (_stricmp(stackFrame, externalNoise[j]) == 0)
+                {
+                    return false;
+                }   
+            }
+            //printf("passed system stack frame: %s   , file name: %s   , module: %s \n", stackFrame, file, moduleName);
+
             //filter system modules
-            framesChecked++;
             for (int j = 0; systemModules[j] != nullptr; j++)
             {
                 if (_stricmp(moduleName, systemModules[j]) == 0)
                 {
-                    //if(_stricmp(moduleName, "ucrtbase.dll") != 0 && _stricmp(moduleName, "ucrtbased.dll") != 0)
-                    
-                        //return false;
                     return false;
                 }   
             }
             //printf("passed system module name : %s\n", module);
-            // continue if the stackframe is from outside the exe
+            framesChecked++;
         }
 
         // return true for user stackframes
         for (int j = 0; userStackFrame[j] != nullptr; j++)
         {
             if (strcmp(stackFrame, userStackFrame[j]) == 0)
-            {
+            {   
+                //check everyframe
+                for (int i = 0; i < rec.frames; i++)
+                {
+                    if(_stricmp(rec.resolvedStack[i], "mainCRTStartup") == 0)
+                    {
+                        return false;
+                    }
+                }
                 return true;
             }
         }
 
-        if (framesChecked > rec.frames - 2)
+        if (framesChecked > rec.frames - 1 )
         {
             return true;
         }

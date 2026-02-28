@@ -41,9 +41,6 @@ DWORD WINAPI MainThread(LPVOID lpParam)
     }
     tracker.trackingEnabled = true;
 
-    //printf("mainThread waiting outside loop.... \n");
-    //fflush(stdout);
-
     while(g_Running)
     {
         Sleep(100);
@@ -60,7 +57,7 @@ BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID lpvReserved)
     
     switch (reason)
     {
-        case DLL_PROCESS_ATTACH: //runs when dll is loaded into process
+        case DLL_PROCESS_ATTACH:
 
             //diable dllMain calls for thread attach and detach
             DisableThreadLibraryCalls(hinstDLL);
@@ -78,7 +75,7 @@ BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID lpvReserved)
         case DLL_PROCESS_DETACH: //dll unloaded - program exiting
 
             g_Running = false;
-
+            
             //printf("DLL_PROCESS_DETACH fired, lpvReserved=%p\n", lpvReserved);
             //fflush(stdout);
 

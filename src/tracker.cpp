@@ -30,7 +30,6 @@ void MemTracker::init()
     allocMap.init();
     capacity = MAX_CAPACITY;
     allocCount = 0;
-    //symInit = false;
 
     g_tlsHeapAlloc = TlsAlloc();
     g_tlsMalloc = TlsAlloc();
@@ -60,13 +59,7 @@ void MemTracker::init()
         std::cerr << "Symbol init failed: " << error << "\n";
         return; //return if symInit fails
     }
-    else {
-        //SymSetSearchPath(hProcess, ".;C:\\Dev\\ntleak");
-        //symInit = true;
-    }
-    
 }
-
 
 void MemTracker::trackAlloc(size_t size, void* ptr)
 {
@@ -77,7 +70,6 @@ void MemTracker::trackAlloc(size_t size, void* ptr)
         rec.size = size;
         rec.active = true;
         rec.frames = CaptureStackBackTrace(2, MAX_FRAMES, rec.callStack, NULL);
-
         rec.status = USED;
 
         allocMap.insertItem(ptr, rec);
@@ -302,10 +294,8 @@ void MemTracker::report()
         std::cout << "|  Average Size  : " << std::left << std::setw(40) << formatBytes(totalLeaked / leakCount) << "|\n";
 
         std::ostringstream largestOss;
-        largestOss << formatBytes(maxLeakSize)
-                   << "  @ 0x" << std::hex << reinterpret_cast<uintptr_t>(maxLeakAddress) << std::dec;
+        largestOss << formatBytes(maxLeakSize) << "  @ 0x" << std::hex << reinterpret_cast<uintptr_t>(maxLeakAddress) << std::dec;
         std::cout << "|  Largest Leak  : " << std::left << std::setw(40) << largestOss.str() << "|\n";
-
         std::cout << "|                                                         |\n";
         std::cout << "|  Breakdown     :  ";
         if (largeLeaks)  std::cout << largeLeaks  << " large  ";
@@ -334,10 +324,8 @@ void MemTracker::report()
 
         std::cout << "  +- Leak #" << leakIndex++ << " " << std::string(50, '-') << "\n";
 
-        std::cout << "  |  Address  :  0x"
-                  << std::hex << reinterpret_cast<uintptr_t>(rec.address) << std::dec << "\n";
-        std::cout << "  |  Size     :  " << formatBytes(rec.size)
-                  << "  (" << rec.size << " bytes)\n";
+        std::cout << "  |  Address  :  0x" << std::hex << reinterpret_cast<uintptr_t>(rec.address) << std::dec << "\n";
+        std::cout << "  |  Size     :  " << formatBytes(rec.size) << "  (" << rec.size << " bytes)\n";
 
         for (USHORT j = 0; j < rec.frames; j++)
         {
@@ -346,10 +334,8 @@ void MemTracker::report()
                 continue;
             }
 
-            if (strstr(rec.fileName[j], "\\include\\thread") ||
-                strstr(rec.fileName[j], "\\vctools\\crt\\")   ||
-                strstr(rec.fileName[j], "\\vcstartup\\")      ||
-                strstr(rec.fileName[j], "Program Files") ||
+            if (strstr(rec.fileName[j], "\\include\\thread") || strstr(rec.fileName[j], "\\vctools\\crt\\") ||
+                strstr(rec.fileName[j], "\\vcstartup\\") || strstr(rec.fileName[j], "Program Files") ||
                 strstr(rec.fileName[j], "minkernel\\crts\\")) 
             {
 
@@ -373,7 +359,7 @@ void MemTracker::report()
 
             const char* systemPatterns[] = {
                 "malloc_base","malloc_dbg","RtlUserThreadStart","BaseThreadInitThunk","__scrt_",
-                "invoke_main","mainCRTStartup","calloc","realloc","HeapAlloc", "mbsdup_dbg", "heap_alloc_dbg", "heap_alloc_dbg_internal", "malloc", "thread_start", "_strdup_dbg", "_wcsdup_dbg",
+                "invoke_main","mainCRTStartup","calloc","realloc","HeapAlloc", "mbsdup_dbg", "heap_alloc_dbg", "heap_alloc_dbg_internal", "malloc", "thread_start", "_strdup_dbg", "_wcsdup_dbg","VirtualAlloc",
                 "detour","operator new","operator delete","std::", "register_onexit_function", "beginthreadex", "wcsrchr"
             };
             bool isSystem = false;
@@ -565,7 +551,7 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
     "setsystime",
 
     nullptr
-};
+    };
 
     static const char* systemModules[] = {
         "dbghelp.dll",
@@ -573,10 +559,8 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
         "SDL2.dll",
         "ig9icd64.dll",
         "igc64.dll",
-        
         nullptr
     };
-
  
     static const char* userStackFrame[] = {
         "main",
@@ -623,7 +607,7 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
             //printf("user module name: %s\n", module);
             //printf("file name: %s\n", file);
             //printf("stack frame: %s\n", stackFrame);
-            
+
             //modules belong to the exe - no need to check for system modules
             for (int j = 0; crtNoise[j] != nullptr; j++)
             {
@@ -632,7 +616,6 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
                     return false;
                 }
             }
-            
             //printf("passed stack frame: %s\n", stackFrame);
             framesChecked++;
         }
@@ -665,10 +648,11 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
                 }   
             }
             //printf("passed system module name : %s\n", module);
+
             framesChecked++;
         }
 
-        // return true for user stackframes
+        // for user stackframes
         for (int j = 0; userStackFrame[j] != nullptr; j++)
         {
             if (strcmp(stackFrame, userStackFrame[j]) == 0)
@@ -683,11 +667,6 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
                 }
                 return true;
             }
-        }
-
-        if (framesChecked > rec.frames - 1 )
-        {
-            return true;
         }
     }
     

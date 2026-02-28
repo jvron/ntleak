@@ -22,8 +22,6 @@
 
 int main(int argc, char* argv[])
 {
-    tracker.trackingEnabled = false;
-
     if (argc < 2)
     {
         printf("Error: no target executable specified.\n");
@@ -117,11 +115,11 @@ int main(int argc, char* argv[])
         
         //wait for process to exit
         WaitForSingleObject(hProc, INFINITE);
-        printf("Child process exited \n");
+        //printf("Child process exited \n");
 
         DWORD exitCode = 0;
         GetExitCodeProcess(hProc, &exitCode);
-        printf("Exit code: %lu\n", exitCode);
+        printf("Child process exited with code: %lu\n", exitCode);
 
         //access shared memory, resolve symbols, report and shutdown
         tracker.trackingEnabled = false;
@@ -148,7 +146,7 @@ int main(int argc, char* argv[])
         CloseHandle(procInfo.hThread);
     } 
     else {
-        printf("Failed to launch process. Error: %lu\n", GetLastError());
+        printf("Failed to launch process. Error code: %lu\n", GetLastError());
     }
 
     return 0;

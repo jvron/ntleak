@@ -280,7 +280,8 @@ LPVOID detourHeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwByt
             }
         }
     }
-    else  {
+    else  
+    {
         if (dwBytes == 0 && !TlsGetValue(g_tlsMalloc) && !TlsGetValue(g_tlsRealloc))
         {
             tracker.trackFree(lpMem);
@@ -618,9 +619,9 @@ MH_STATUS createHooks()
     HMODULE hCRTModule = NULL;
     const char* crtModuleName = NULL;
     const char* vcrtModuleName = NULL;
-    HMODULE hVCRuntime = NULL;
     HMODULE hKernel32 = NULL;
-    HMODULE hNtdll = NULL;
+    //HMODULE hVCRuntime = NULL;
+    //HMODULE hNtdll = NULL;
 
     for (int i = 0; i < moduleCount; i++)
     {
@@ -681,6 +682,7 @@ MH_STATUS createHooks()
         virtualFreeAddr = (void*) GetProcAddress(hKernel32, "VirtualFree");
     }
 
+/*
     hNtdll = GetModuleHandleA("ntdll.dll");
 
     if (hNtdll == NULL)
@@ -692,6 +694,7 @@ MH_STATUS createHooks()
         rtlAllocateHeapAddr = (void*) GetProcAddress(hNtdll, "RtlAllocateHeap");
         rtlFreeHeapAddr = (void*) GetProcAddress(hNtdll, "RtlFreeHeap");
     }
+*/
 
 /*
     if (hVCRuntime == NULL)

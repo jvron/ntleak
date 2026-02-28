@@ -66,7 +66,6 @@ bool HashTable::isEmpty()
 {
     for (int i = 0; i < hashGroups; i++)
     {   
-        
        if (table[i].address != nullptr)
        {
             return false;

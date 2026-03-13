@@ -3,9 +3,6 @@
 #include <windows.h>
 #include <MinHook.h>
 #include <cstddef>
-#include <memoryapi.h>
-#include <minwindef.h>
-#include <stdlib.h>
 #include <winnt.h>
 #include <winternl.h>
 

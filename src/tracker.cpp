@@ -1,19 +1,13 @@
 #include <windows.h>
-#include <psapi.h>
-#include <processthreadsapi.h>
-#include <MinHook.h>
 #include <corecrt.h>
-#include <cstring>
 #include <iomanip>
 #include <cstddef>
 #include <libloaderapi.h>
-#include <memoryapi.h>
-#include <minwindef.h>
-#include <winnt.h>
 #include <iostream>
 #include <sstream>
-
+#include <crtdbg.h>
 #include <dbghelp.h>
+#include <winscard.h>
 #pragma comment(lib, "dbghelp.lib")
 
 #include <shlwapi.h>
@@ -30,6 +24,7 @@ void MemTracker::init()
     allocMap.init();
     capacity = MAX_CAPACITY;
     allocCount = 0;
+    linktype = UNKOWN;
 
     g_tlsHeapAlloc = TlsAlloc();
     g_tlsMalloc = TlsAlloc();
@@ -61,7 +56,7 @@ void MemTracker::init()
     }
 }
 
-void MemTracker::trackAlloc(size_t size, void* ptr)
+void MemTracker::trackAlloc(size_t size, void* ptr, AllocSource s)
 {
     if (trackingEnabled)
     {
@@ -71,7 +66,7 @@ void MemTracker::trackAlloc(size_t size, void* ptr)
         rec.active = true;
         rec.frames = CaptureStackBackTrace(2, MAX_FRAMES, rec.callStack, NULL);
         rec.status = USED;
-
+        rec.source = s;
         allocMap.insertItem(ptr, rec);
     
         allocCount++;
@@ -80,7 +75,7 @@ void MemTracker::trackAlloc(size_t size, void* ptr)
 
 void MemTracker::trackFree(void *ptr)
 {   
-    if (trackingEnabled)
+    if (trackFreeEnabled)
     {
         AllocRecord *rec = allocMap.searchTable(ptr);
     
@@ -296,11 +291,11 @@ void MemTracker::report()
         std::ostringstream largestOss;
         largestOss << formatBytes(maxLeakSize) << "  @ 0x" << std::hex << reinterpret_cast<uintptr_t>(maxLeakAddress) << std::dec;
         std::cout << "|  Largest Leak  : " << std::left << std::setw(40) << largestOss.str() << "|\n";
-        std::cout << "|                                                         |\n";
+        std::cout << "|                                                          |\n";
         std::cout << "|  Breakdown     :  ";
         if (largeLeaks)  std::cout << largeLeaks  << " large  ";
         if (mediumLeaks) std::cout << mediumLeaks << " medium  ";
-        if (smallLeaks)  std::cout << smallLeaks  << " small  "  << "                    |";
+        if (smallLeaks)  std::cout << smallLeaks  << " small  "  << "                             |";
         std::cout << "\n";
     }
     std::cout << "+---------------------------------------------------------+\n\n";
@@ -342,7 +337,7 @@ void MemTracker::report()
                 continue;
             }
 
-            std::cout << "  |  Module   :  " << rec.moduleName[j] << "\n";
+            std::cout << "  |  Module   :  " << rec.moduleName[j]   << "\n";
             std::cout << "  |  File     :  " << rec.fileName[j]   << "\n";
             std::cout << "  |  Line     :  " << rec.lineNum[j]    << "\n";
             break;
@@ -355,7 +350,11 @@ void MemTracker::report()
         for (USHORT j = 0; j < rec.frames; j++)
         {
             const char* sym = rec.resolvedStack[j];
-            if (!sym || sym[0] == '\0') continue;
+
+            if (!sym || sym[0] == '\0')
+            {
+                continue;
+            }   
 
             const char* systemPatterns[] = {
                 "malloc_base","malloc_dbg","RtlUserThreadStart","BaseThreadInitThunk","__scrt_",
@@ -364,7 +363,11 @@ void MemTracker::report()
             };
             bool isSystem = false;
             for (const char* p : systemPatterns)
-                if (strstr(sym, p)) { isSystem = true; break; }
+                if (strstr(sym, p)) 
+                { 
+                    isSystem = true; 
+                    break; 
+                }
 
             if (!isSystem)
             {
@@ -417,6 +420,7 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
 
     static const char* crtNoise[] = {
         "mainCRTStartup",
+        "recalloc_dbg",
         "wmainCRTStartup", 
         "WinMainCRTStartup",
         "__scrt_common_main",
@@ -435,6 +439,7 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
         "__acrt_initialize_multibyte",
         "beginthreadex",
         "_beginthreadex",
+    
         "register_onexit_function",
         "create_environment<char>",
         "__acrt_allocate_buffer_for_argv",
@@ -532,6 +537,7 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
     "TpWaitForWork",
     "TppWorkpExecuteCallback",
     "TppWorkerThread",
+    "register_onexit_function",
 
     // ETW 
     "EtwEventWriteNoRegistration",
@@ -612,7 +618,8 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
             for (int j = 0; crtNoise[j] != nullptr; j++)
             {
                 if (strcmp(stackFrame, crtNoise[j]) == 0)
-                {
+                {   
+                    //printf("filtered user stack frame: %s\n", stackFrame);
                     return false;
                 }
             }
@@ -633,7 +640,8 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
             for (int j = 0; externalNoise[j] != nullptr; j++)
             {
                 if (_stricmp(stackFrame, externalNoise[j]) == 0)
-                {
+                {   
+                    //printf("filtered external stack frame: %s\n", stackFrame);
                     return false;
                 }   
             }
@@ -643,7 +651,8 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
             for (int j = 0; systemModules[j] != nullptr; j++)
             {
                 if (_stricmp(moduleName, systemModules[j]) == 0)
-                {
+                {   
+                    //printf("filtered system module: %s\n", stackFrame);
                     return false;
                 }   
             }
@@ -657,14 +666,7 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
         {
             if (strcmp(stackFrame, userStackFrame[j]) == 0)
             {   
-                //check everyframe
-                for (int i = 0; i < rec.frames; i++)
-                {
-                    if(_stricmp(rec.resolvedStack[i], "mainCRTStartup") == 0)
-                    {
-                        return false;
-                    }
-                }
+                //printf("user stack frame detected: %s, module: %s \n", stackFrame, moduleName)
                 return true;
             }
         }
@@ -674,7 +676,8 @@ bool MemTracker::isUserLeak(AllocRecord &rec)
 }
 
 void MemTracker::shutdown()
-{
+{   
+    allocMap.cleanup();
     SymCleanup(hProcess);
     TlsFree(g_tlsHeapAlloc);
     TlsFree(g_tlsMalloc);

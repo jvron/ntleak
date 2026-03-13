@@ -1,5 +1,8 @@
-#include <cstdio>
+
+#include <iostream>
 #include <windows.h>
+#include <process.h>
+#include <cstdio>
 #include <winternl.h> 
 #include <cstring>
 #include <psapi.h>
@@ -14,11 +17,15 @@
 #include <stdio.h>
 #include <winnt.h>
 
+#include <crtdbg.h>
+
 #include <shlwapi.h>
 #pragma comment(lib, "Shlwapi.lib")
 
 #include "hooks.h"
 #include "tracker.h"
+#include "alloc_map.h"
+
 
 //function pointers that points to the original funtion. MinHook will store the target functions in these function pointers
 
@@ -45,6 +52,7 @@ BOOL (*pVirtualFreeOriginal) (LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType)
 
 PVOID (*pRtlAllocateHeapOriginal)(PVOID HeapHandle, ULONG Flags, SIZE_T Size) = NULL;
 BOOLEAN (*pRtlFreeHeapOriginal)(PVOID HeapHandle, ULONG Flags, PVOID HeapBase) = NULL;
+
 
 VOID (*pExitProcessOriginal) (UINT uExitCode) = NULL;
 
@@ -74,6 +82,7 @@ DWORD g_tlsMalloc = TLS_OUT_OF_INDEXES;
 DWORD g_tlsRealloc = TLS_OUT_OF_INDEXES;
 DWORD g_tlsOperatorNew = TLS_OUT_OF_INDEXES;
 
+
 MH_STATUS initMinHook()
 {   
     MH_STATUS status;
@@ -102,17 +111,17 @@ void* detourMalloc(size_t size)
     {
         return pMallocOriginal(size);
     }
-    TlsSetValue(g_tlsMalloc, (LPVOID) 1);
 
+    TlsSetValue(g_tlsMalloc, (LPVOID) 1);
+    
     void *memptr = pMallocOriginal(size);
-   //&& !TlsGetValue(g_tlsOperatorNew)
+       
     if (memptr != NULL )
     {
-        tracker.trackAlloc(size, memptr);
+        tracker.trackAlloc(size, memptr, MALLOC);
     };
-
     //printf("malloc returned: %p for size: %zu\n", memptr, size);
-    
+        
     TlsSetValue(g_tlsMalloc, (LPVOID) 0);
     return memptr;
 }
@@ -126,7 +135,7 @@ void detourFree(void *ptr)
 
 void* detourRealloc(void *memptr, size_t size)
 {   
-    //inRealloc = true;
+    
     TlsSetValue(g_tlsRealloc, (LPVOID) 1);
 
     void* newptr = pReallocOriginal(memptr, size);
@@ -135,18 +144,18 @@ void* detourRealloc(void *memptr, size_t size)
     {   
         if (memptr == NULL) //same as malloc
         {
-            tracker.trackAlloc(size, newptr);
+            tracker.trackAlloc(size, newptr, REALLOC);
         }
 
         else if (newptr != memptr) // new pointer returned by realloc, old ptr freed
         {
             tracker.trackFree(memptr);
-            tracker.trackAlloc(size, newptr);
+            tracker.trackAlloc(size, newptr, REALLOC);
         }
         
         else if (newptr == memptr)
         {
-            tracker.trackAlloc(size, memptr); // replace the old allocation with new size
+            tracker.trackAlloc(size, memptr, REALLOC); // replace the old allocation with new size
         }
     }
     else { // newptr == NULL
@@ -179,9 +188,9 @@ void* detourOperatorNew(size_t size)
 
     if(memptr != nullptr) // in case new is called with nothrow 
     {
-        tracker.trackAlloc(size, memptr);
+        //tracker.trackAlloc(size, memptr);
     }
-    printf("operatorNew: %p size=%zu\n", memptr, size);
+    //printf("operatorNew: %p size=%zu\n", memptr, size);
     
     TlsSetValue(g_tlsOperatorNew, (LPVOID) 0);
     return memptr;
@@ -205,7 +214,7 @@ void* detourOperatorNewArray(size_t size)
     void* memptr = pOperatorNewArrayOriginal(size);
     //std::bad_alloc is automatically handled
 
-    tracker.trackAlloc(size, memptr);
+    //tracker.trackAlloc(size, memptr);
 
     TlsSetValue(g_tlsOperatorNew, (LPVOID) 0);
     return memptr;
@@ -219,6 +228,8 @@ void detourOperatorDeleteArray(void *ptr)
 
 LPVOID detourHeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes)
 {   
+    //TlsSetValue( g_tlsMalloc, (LPVOID) 0);
+    //TlsSetValue(g_tlsRealloc, (LPVOID) 0);
 
     if (TlsGetValue(g_tlsHeapAlloc))
     {   //reentrancy
@@ -234,11 +245,11 @@ LPVOID detourHeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes)
     {   
         if (tracker.trackingEnabled && !TlsGetValue(g_tlsMalloc) && !TlsGetValue(g_tlsRealloc))
         {
-            tracker.trackAlloc(dwBytes, memptr);
+            tracker.trackAlloc(dwBytes, memptr, HEAP_ALLOC);
             //printf("HeapAlloc returned: %p\n", memptr);
         }
     } 
-    //printf("RtlAllocateHeap: %p size=%zu \n",memptr, dwBytes);
+    
     TlsSetValue(g_tlsHeapAlloc, (LPVOID)0);
     return memptr;
 }
@@ -258,7 +269,9 @@ BOOL detourHeapFree(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem)
 
 LPVOID detourHeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwBytes)
 {
-    
+    //TlsSetValue( g_tlsMalloc, (LPVOID) 0);
+    //TlsSetValue(g_tlsRealloc, (LPVOID) 0);
+
     void* newptr = pHeapReAllocOriginal(hHeap, dwFlags, lpMem, dwBytes);
 
     if(newptr != NULL)
@@ -266,17 +279,18 @@ LPVOID detourHeapReAlloc(HANDLE hHeap, DWORD dwFlags, LPVOID lpMem, SIZE_T dwByt
         if (!TlsGetValue(g_tlsMalloc) && !TlsGetValue(g_tlsRealloc))
         {
             if (lpMem == NULL) //same as HeapAlloc
-            {
-                tracker.trackAlloc(dwBytes, newptr);
+            {   
+                tracker.trackAlloc(dwBytes, newptr, HEAP_REALLOC);
             }
             else if (newptr != lpMem) // new pointer returned by HeapReAlloc, old ptr freed
             {
                 tracker.trackFree(lpMem);
-                tracker.trackAlloc(dwBytes, newptr);
+                tracker.trackAlloc(dwBytes, newptr, HEAP_REALLOC);
             }
             else if (newptr == lpMem)
-            {
-                tracker.trackAlloc(dwBytes, lpMem); // replace the old allocation with new size
+            {   
+                tracker.trackFree(lpMem);
+                tracker.trackAlloc(dwBytes, lpMem, HEAP_REALLOC); // replace the old allocation with new size
             }
         }
     }
@@ -299,7 +313,7 @@ PVOID detourVirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType
 
     if (memptr != NULL)
     {
-        tracker.trackAlloc(dwSize, memptr);
+        tracker.trackAlloc(dwSize, memptr, VIRTUAL_ALLOC);
     }
     return memptr;
 }
@@ -324,7 +338,7 @@ PVOID detourRtlAllocateHeap(PVOID HeapHandle, ULONG Flags, SIZE_T Size)
     {   
         if (!TlsGetValue(g_tlsHeapAlloc) && !TlsGetValue(g_tlsMalloc) && !TlsGetValue(g_tlsRealloc))
         {
-            tracker.trackAlloc(Size, memptr);
+            //tracker.trackAlloc(Size, memptr);
         }
     }
 
@@ -346,21 +360,25 @@ BOOLEAN detourRtlFreeHeap(PVOID HeapHandle, ULONG Flags, PVOID HeapBase)
 VOID detourExitProcess(UINT uExitCode)
 {   
     tracker.trackingEnabled = false;
+    tracker.trackFreeEnabled = true;
 
+    tracker.trackFreeEnabled = false;
     MH_STATUS status;
  
     MH_DisableHook(MH_ALL_HOOKS);
     MH_RemoveHook(MH_ALL_HOOKS);
+
     status = uninitMinHook();
 
     tracker.resolveSymbols();
-    tracker.shutdown();
     tracker.report();
+    tracker.shutdown();
 
 
     //safe to call ExitProcess directly as hooks are removed
     ExitProcess(uExitCode);
 }
+
 
 MH_STATUS hookEntry()
 {
@@ -584,6 +602,7 @@ MH_STATUS hookExitProcess()
     return status;
 }
 
+
 MH_STATUS createHooks()
 {   
     MH_STATUS status = MH_UNKNOWN;
@@ -594,7 +613,7 @@ MH_STATUS createHooks()
     HMODULE *hModules = (HMODULE*) malloc(modulesBuffSize * sizeof(HMODULE));
     if (hModules == NULL)
     {   
-        printf("Failed to allocate memory for modules.\n");
+        std::cerr << "Failed to allocate memory for modules.\n";
         return status;
     }
 
@@ -612,10 +631,12 @@ MH_STATUS createHooks()
         }
     }
     else {
-        printf("module enumeration failed");  
+        std::cerr << "Module enumeration failed\n";  
     }
+
     int moduleCount = cbNeeded / sizeof(HMODULE);
     char moduleFilePath[MAX_PATH];
+
     HMODULE hCRTModule = NULL;
     const char* crtModuleName = NULL;
     const char* vcrtModuleName = NULL;
@@ -632,21 +653,30 @@ MH_STATUS createHooks()
         if (strcmp(moduleName, "ucrtbase.dll") == 0)
         {
             hCRTModule = hModules[i];
+            tracker.linktype = DYNAMIC;
             crtModuleName = "ucrtbase.dll";
             break;
         }
         else if (strcmp(moduleName, "ucrtbased.dll") == 0) 
-        {
+        {   
             hCRTModule = hModules[i];
+            tracker.linktype = DYNAMIC_DEBUG;
             crtModuleName = "ucrtbased.dll";
             break;
         }
         else if (strcmp(moduleName, "msvcrt.dll") == 0) 
         {
             hCRTModule = hModules[i];
+            tracker.linktype = DYNAMIC;
             crtModuleName = "msvcrt.dll";
             break;
         }
+    
+    }
+
+    if (tracker.linktype == UNKOWN)
+    {   //if no dynamic crt modules are found assume that its statically linked  
+        tracker.linktype = STATIC;
     }
 
     if(hCRTModule == NULL)
@@ -827,7 +857,13 @@ MH_STATUS enableHooks()
 {
     MH_STATUS status = MH_UNKNOWN;
 
+    status = hookMalloc();
+    if(status != MH_OK) return status;
+    
     status = hookRealloc();
+    if(status != MH_OK) return status;
+
+    status = hookFree();
     if(status != MH_OK) return status;
 
     status = hookVirtualAlloc();
@@ -835,13 +871,21 @@ MH_STATUS enableHooks()
 
     status = hookVirtualFree();
     if(status != MH_OK) return status;
-    
-    status = hookMalloc();
+
+    status = hookHeapAlloc();
     if(status != MH_OK) return status;
 
-    status = hookFree();
+    status = hookHeapFree();
     if(status != MH_OK) return status;
-/*
+
+    status = hookHeapReAlloc();
+    if(status != MH_OK) return status;
+
+    status = hookExitProcess();
+    if(status != MH_OK) return status;
+
+/*  
+
     status = hookOperatorNew();
     if(status != MH_OK) return status;
 
@@ -852,24 +896,13 @@ MH_STATUS enableHooks()
     if(status != MH_OK) return status;
     status = hookOperatorDeleteArray();
     if(status != MH_OK) return status;
-*/
-    status = hookHeapAlloc();
-    if(status != MH_OK) return status;
-
-    status = hookHeapFree();
-    if(status != MH_OK) return status;
-
-    status = hookHeapReAlloc();
-    if(status != MH_OK) return status;
 
     //status = hookRtlAllocateHeap();
     if(status != MH_OK) return status;
 
     //status = hookRtlFreeHeap();
     if(status != MH_OK) return status;
-
-    status = hookExitProcess();
-    if(status != MH_OK) return status;
+*/
 
     return status;
 }

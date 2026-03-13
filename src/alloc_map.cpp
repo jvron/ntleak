@@ -41,7 +41,7 @@ void HashTable::init()
     */
 }
 
-HashTable::~HashTable()
+void HashTable::cleanup()
 {   
     /*
     BOOL result = 1;

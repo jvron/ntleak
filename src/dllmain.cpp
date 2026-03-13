@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <processthreadsapi.h>
 #include <handleapi.h>
 #include <atomic>
 #include <synchapi.h>
@@ -16,7 +17,9 @@ HANDLE g_hThread = NULL; //global thread handle
 
 DWORD WINAPI MainThread(LPVOID lpParam)
 {   
+    
     tracker.trackingEnabled = false;
+    tracker.trackFreeEnabled = false;
 
     //printf("mainThread running.... \n");
     MH_STATUS status;
@@ -33,13 +36,31 @@ DWORD WINAPI MainThread(LPVOID lpParam)
 
     //opens the event created by the injector, gets the handle to the event
     HANDLE hReady = OpenEventA(EVENT_MODIFY_STATE, FALSE, "ntleak_hooks_ready");
+    HANDLE hMDdTrue = OpenEventA(EVENT_MODIFY_STATE, FALSE, "ntleak_dynamic_debug_crt");
 
+    if (tracker.linktype == DYNAMIC_DEBUG)
+    {   
+        MH_DisableHook(MH_ALL_HOOKS);
+        MH_RemoveHook(MH_ALL_HOOKS);
+        uninitMinHook();
+        tracker.shutdown();
+
+        if(hMDdTrue)
+        {
+            SetEvent(hMDdTrue); // signals the event
+            CloseHandle(hMDdTrue);
+        }
+        return 1;
+    }
+
+    tracker.trackingEnabled = true;
+    tracker.trackFreeEnabled = true;
+    
     if(hReady)
     {
         SetEvent(hReady); // signals the event
         CloseHandle(hReady);
     }
-    tracker.trackingEnabled = true;
 
     while(g_Running)
     {
@@ -75,7 +96,7 @@ BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD reason, LPVOID lpvReserved)
         case DLL_PROCESS_DETACH: //dll unloaded - program exiting
 
             g_Running = false;
-            
+
             //printf("DLL_PROCESS_DETACH fired, lpvReserved=%p\n", lpvReserved);
             //fflush(stdout);
 

@@ -1,31 +1,27 @@
+#include <iostream>
+#include <ostream>
 #include <windows.h>
 #include <memoryapi.h>
-#include <debugapi.h>
 #include <minwinbase.h>
 #include <synchapi.h>
-#include <cstdio>
 #include <libloaderapi.h>
 #include <minwindef.h>
-#include <cstring>
 #include <cstdlib>
 #include <processthreadsapi.h>
-#include <MinHook.h>
 #include <cstddef>
 #include <handleapi.h>
-#include <stdio.h>
 #include <winnt.h>
 #include <string>
 
 #include "tracker.h"
 #include "alloc_map.h"
 
-
 int main(int argc, char* argv[])
 {
     if (argc < 2)
     {
-        printf("Error: no target executable specified.\n");
-        printf("Usage: ntleak <path_to_executable>\n");
+        std::cerr << "Error: no target executable specified.\n";
+        std::cerr << "Usage: ntleak <path_to_executable>\n";
         return -1;
     }
 
@@ -37,14 +33,14 @@ int main(int argc, char* argv[])
 
     if (cwdRes == 0)
     {
-        printf("GetCurrentDirectory failed %lu\n", GetLastError());
-        return -1;
+        std::cerr << "GetCurrentDirectory failed. Error code: " <<  GetLastError() << std::endl;
+        return 1;
     }
 
     if(cwdRes > MAX_PATH)
     {
-        printf("Buffer too small; need %lu characters\n", cwdRes);
-        return -1;
+        std::cerr << "Buffer too small, need " << cwdRes << " characters\n";
+        return 1;
     }
 
     PROCESS_INFORMATION procInfo;
@@ -59,6 +55,7 @@ int main(int argc, char* argv[])
 
     char *cmd = exePath.data();
 
+    //char dllPath[MAX_PATH] = "C:\\Dev\\ntleak\\build_release\\Release\\ntleak.dll";
     char dllPath[MAX_PATH] = "C:\\Dev\\ntleak\\build\\Debug\\ntleak.dll";
 
     BOOL result = CreateProcessA(NULL, cmd, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &startInfo, &procInfo);
@@ -68,11 +65,13 @@ int main(int argc, char* argv[])
         //std::cout << "Child launched. Waiting...\n";
         DWORD procId = procInfo.dwProcessId;
         HANDLE hProc = procInfo.hProcess;
+        HANDLE hThread = procInfo.hThread;
         
         HANDLE hMapFile = NULL;
         HANDLE hRThread = NULL;
 
         HANDLE hReady = CreateEventA(NULL, TRUE, FALSE, "ntleak_hooks_ready");
+        HANDLE hMDdTrue =  CreateEventA(NULL, TRUE, FALSE, "ntleak_dynamic_debug_crt");
         
         //allocate memory for dllPath inside the target process - VirtualAllocEx allocates memory in externel process
         void* memptr = VirtualAllocEx(hProc, NULL, sizeof(dllPath), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -89,23 +88,45 @@ int main(int argc, char* argv[])
         
         if (hRThread == NULL)
         {
-            printf("remote thread creation failed. Error: %lu\n", GetLastError());
+            std::cerr << "remote thread creation failed. Error: " << GetLastError() << std::endl;
             return -1;
         }
 
         //wait for dll to load
         WaitForSingleObject(hRThread, INFINITE);
-        printf("LoadLibrary finished\n");
+        //printf("LoadLibrary finished\n");
 
-        //wait for hooks to initialize
-        WaitForSingleObject(hReady, INFINITE);
-        CloseHandle(hReady);
+
+        HANDLE events[2] = {hReady, hMDdTrue};
+        //wait for hooks to initialze or if the target is compiled with /MDd 
+        DWORD eventResult = WaitForMultipleObjects(2, events, FALSE, INFINITE);
+
+        if (eventResult == WAIT_OBJECT_0 + 1) //if hMDdTrue is flagged 
+        {
+            std::cerr << "[ntleak] ERROR: Target compiled with /MDd (debug CRT). ntleak does not support /MDd.\n";
+            TerminateProcess(hProc, 1);
+            if (hRThread)
+            {
+                CloseHandle(hRThread);
+            }
+
+            CloseHandle(hMDdTrue);
+            CloseHandle(hProc);
+            CloseHandle(hThread);
+            
+            return 1;
+        }
+        else {
+            //continue if hooks are ready 
+            CloseHandle(hReady);
+            CloseHandle(hMDdTrue);
+        }
 
         hMapFile = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, "ntleak_allocation_table");
 
         if (hMapFile == NULL)
         {
-            printf("Could not open file mapping object (%lu).\n", GetLastError());
+            std::cerr << "Could not open file mapping object. Error code: "<<  GetLastError() << std::endl;
             return 1;
         }
                 
@@ -119,7 +140,7 @@ int main(int argc, char* argv[])
 
         DWORD exitCode = 0;
         GetExitCodeProcess(hProc, &exitCode);
-        printf("Child process exited with code: %lu\n", exitCode);
+        std::cout << "Child process exited with code: " << exitCode << std::endl;
 
         //access shared memory, resolve symbols, report and shutdown
         tracker.trackingEnabled = false;
@@ -127,7 +148,7 @@ int main(int argc, char* argv[])
         
         if (sharedMem == NULL)
         {
-            printf("unable to access shared memory. Error code: %lu", GetLastError());
+            std::cerr << "unable to access shared memory. Error code: " <<  GetLastError() << std::endl;
             return -1;
         }
         
@@ -146,7 +167,8 @@ int main(int argc, char* argv[])
         CloseHandle(procInfo.hThread);
     } 
     else {
-        printf("Failed to launch process. Error code: %lu\n", GetLastError());
+        std::cerr << "Failed to launch process. Error code: " << GetLastError() << std::endl;
+        return 1;
     }
 
     return 0;

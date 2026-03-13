@@ -18,12 +18,16 @@ enum RecordStatus {
     DELETED
 };
 
+enum AllocSource {
+    MALLOC, REALLOC, HEAP_ALLOC, HEAP_REALLOC, VIRTUAL_ALLOC, RECALLOC_DBG
+};
+
 struct AllocRecord{
 
     size_t size;
     void* address;
     bool active; //if the allocation is still active after end of user program - leak
-
+    AllocSource source;
     void* callStack[MAX_FRAMES]; //call stack is the logical sequence of funtion calls, while stack is a region in memory 
     USHORT frames; //unsigned short - 16bit / 2 byte int. Holds the number of stack frames
     char resolvedStack[MAX_FRAMES][MAX_SYM_NAME];
@@ -40,8 +44,6 @@ public:
     static const int hashGroups = MAX_CAPACITY;
     //table is a pointer that points to the first element of an array of AllocRecord objects. points to the first element of the block of memory
     AllocRecord *table = nullptr;
-    
-    ~HashTable();
 
     void init();
     bool isEmpty();
@@ -49,6 +51,7 @@ public:
     void insertItem(void* ptr, AllocRecord record);
     void deleteItem(void* ptr);
     AllocRecord* searchTable(void* ptr);
+    void cleanup();
 
 private:
     HANDLE hMapFile; // handle ro file mapping

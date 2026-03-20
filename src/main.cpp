@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <iostream>
 #include <ostream>
 #include <windows.h>
@@ -27,36 +28,17 @@ int main(int argc, char* argv[])
 
     char* exeName = argv[1];
     
-    char cwd[MAX_PATH];
-
-    DWORD cwdRes = GetCurrentDirectory(MAX_PATH, cwd);
-
-    if (cwdRes == 0)
-    {
-        std::cerr << "GetCurrentDirectory failed. Error code: " <<  GetLastError() << std::endl;
-        return 1;
-    }
-
-    if(cwdRes > MAX_PATH)
-    {
-        std::cerr << "Buffer too small, need " << cwdRes << " characters\n";
-        return 1;
-    }
-
-    PROCESS_INFORMATION procInfo;
-    STARTUPINFOA startInfo;
-
-    ZeroMemory(&startInfo, sizeof(startInfo));
-    startInfo.cb = sizeof(STARTUPINFOA);
-
-    std::string backslash = "\\";
-
-    std::string exePath = cwd + backslash + exeName;
-
+    std::filesystem::path cwd = std::filesystem::current_path();
+    std::string exePath = cwd.string() + "\\" + exeName;
     char *cmd = exePath.data();
 
     //char dllPath[MAX_PATH] = "C:\\Dev\\ntleak\\build_release\\Release\\ntleak.dll";
     char dllPath[MAX_PATH] = "C:\\Dev\\ntleak\\build\\Debug\\ntleak.dll";
+
+    PROCESS_INFORMATION procInfo;
+    STARTUPINFOA startInfo;
+    ZeroMemory(&startInfo, sizeof(startInfo));
+    startInfo.cb = sizeof(STARTUPINFOA);
 
     BOOL result = CreateProcessA(NULL, cmd, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &startInfo, &procInfo);
 

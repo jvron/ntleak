@@ -1,17 +1,7 @@
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #include <filesystem>
 #include <iostream>
-#include <ostream>
-#include <windows.h>
-#include <memoryapi.h>
-#include <minwinbase.h>
-#include <synchapi.h>
-#include <libloaderapi.h>
-#include <minwindef.h>
-#include <cstdlib>
-#include <processthreadsapi.h>
-#include <cstddef>
-#include <handleapi.h>
-#include <winnt.h>
 #include <string>
 
 #include "tracker.h"

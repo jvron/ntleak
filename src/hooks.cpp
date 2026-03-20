@@ -1,23 +1,8 @@
-
-#include <iostream>
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <process.h>
-#include <cstdio>
-#include <winternl.h> 
-#include <cstring>
 #include <psapi.h>
-#include <MinHook.h>
-#include <cstddef>
-#include <cstdlib>
-#include <heapapi.h>
-#include <libloaderapi.h>
-#include <memoryapi.h>
-#include <minwindef.h>
-#include <processthreadsapi.h>
-#include <stdio.h>
-#include <winnt.h>
-
-#include <crtdbg.h>
+#include <cstdio>
+#include <iostream>
 
 #include <shlwapi.h>
 #pragma comment(lib, "Shlwapi.lib")
@@ -26,9 +11,7 @@
 #include "tracker.h"
 #include "alloc_map.h"
 
-
 //function pointers that points to the original funtion. MinHook will store the target functions in these function pointers
-
 void (*pEntryOriginal)(void) = NULL;
 
 void* (*pMallocOriginal)(size_t size) = NULL;
@@ -71,7 +54,7 @@ DWORD g_tlsRealloc = TLS_OUT_OF_INDEXES;
 
 
 MH_STATUS initMinHook()
-{   
+{
     MH_STATUS status;
     status = MH_Initialize();
     if(status != MH_OK) return status;
@@ -296,7 +279,7 @@ VOID detourExitProcess(UINT uExitCode)
 {   
     tracker.trackingEnabled = false;
     tracker.trackFreeEnabled = false;
-    
+
     MH_STATUS status;
     status = disableHooks();
     status = removeHooks();

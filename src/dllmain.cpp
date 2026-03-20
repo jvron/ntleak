@@ -1,13 +1,6 @@
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <processthreadsapi.h>
-#include <handleapi.h>
 #include <atomic>
-#include <synchapi.h>
-#include <MinHook.h>
-#include <cstdlib>
-#include <minwinbase.h>
-#include <minwindef.h>
-#include <winnt.h>
 
 #include "hooks.h"
 #include "tracker.h"
@@ -17,11 +10,9 @@ HANDLE g_hThread = NULL; //global thread handle
 
 DWORD WINAPI MainThread(LPVOID lpParam)
 {   
-    
     tracker.trackingEnabled = false;
     tracker.trackFreeEnabled = false;
 
-    //printf("mainThread running.... \n");
     MH_STATUS status;
     //printf("calling tracker.init\n"); fflush(stdout);
     tracker.init();
@@ -32,7 +23,6 @@ DWORD WINAPI MainThread(LPVOID lpParam)
     //printf("createHooks status: %d\n", status); fflush(stdout);
     status = enableHooks();
     //printf("enableHooks status: %d\n", status); fflush(stdout);
-    
 
     //opens the event created by the injector, gets the handle to the event
     HANDLE hReady = OpenEventA(EVENT_MODIFY_STATE, FALSE, "ntleak_hooks_ready");
@@ -40,6 +30,7 @@ DWORD WINAPI MainThread(LPVOID lpParam)
 
     if (tracker.linktype == DYNAMIC_DEBUG)
     {   
+        //target compiled with /MDd produces false positives due to CRT debug allocations 
         MH_DisableHook(MH_ALL_HOOKS);
         MH_RemoveHook(MH_ALL_HOOKS);
         uninitMinHook();

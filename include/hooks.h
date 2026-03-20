@@ -1,10 +1,7 @@
 #pragma once
 
-#include <windows.h>
 #include <MinHook.h>
-#include <cstddef>
-#include <winnt.h>
-#include <winternl.h>
+#include <minwindef.h>
 
 extern DWORD g_tlsHeapAlloc;
 extern DWORD g_tlsMalloc;

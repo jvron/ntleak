@@ -1,9 +1,8 @@
 #pragma once
 
+#define WIN32_MEAN_AND_LEAN
 #include <windows.h>
 #include <minwindef.h>
-#include <cstddef>
-#include <cstring>
 #include <functional>
 #include <dbghelp.h>
 

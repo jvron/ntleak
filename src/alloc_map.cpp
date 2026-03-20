@@ -1,6 +1,6 @@
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <memoryapi.h>
-#include <winnt.h>
+
 #include "alloc_map.h"
 
 void HashTable::init()

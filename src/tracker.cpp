@@ -1,13 +1,11 @@
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <corecrt.h>
+#include <psapi.h>
 #include <iomanip>
-#include <cstddef>
-#include <libloaderapi.h>
 #include <iostream>
 #include <sstream>
-#include <crtdbg.h>
+
 #include <dbghelp.h>
-#include <winscard.h>
 #pragma comment(lib, "dbghelp.lib")
 
 #include <shlwapi.h>

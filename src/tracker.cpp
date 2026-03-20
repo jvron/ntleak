@@ -29,7 +29,6 @@ void MemTracker::init()
     g_tlsHeapAlloc = TlsAlloc();
     g_tlsMalloc = TlsAlloc();
     g_tlsRealloc = TlsAlloc();
-    g_tlsOperatorNew = TlsAlloc();
 
     hExe = GetModuleHandle(NULL);
     hProcess = GetCurrentProcess(); //unique identifier to current process
@@ -682,6 +681,5 @@ void MemTracker::shutdown()
     TlsFree(g_tlsHeapAlloc);
     TlsFree(g_tlsMalloc);
     TlsFree(g_tlsRealloc);
-    TlsFree(g_tlsOperatorNew);
 }
 

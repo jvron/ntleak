@@ -35,13 +35,6 @@ void* (*pMallocOriginal)(size_t size) = NULL;
 void (*pFreeOriginal)(void* ptr) = NULL;
 void* (*pReallocOriginal)(void* memptr, size_t size) = NULL; 
 
-void* (*pOperatorNewOriginal) (size_t size) = NULL;
-void (*pOperatorDeleteOriginal)(void* ptr) = NULL;
-
-void* (*pOperatorNewArrayOriginal) (size_t size) = NULL;
-void (*pOperatorDeleteArrayOriginal)(void* ptr) = NULL;
-
-
 LPVOID (*pHeapAllocOriginal)(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes) = NULL;
 BOOL (*pHeapFreeOriginal) (HANDLE hHeap, DWORD dwFlags, LPVOID lpMem) = NULL;
 
@@ -68,11 +61,6 @@ void* heapFreeAddr = NULL;
 void* virtualAllocAddr = NULL;
 void* virtualFreeAddr = NULL;
 
-void* opNewAddr = NULL;
-void* opDeleteAddr = NULL;
-void* opNewArrayAddr = NULL;
-void* opDeleteArrayAddr = NULL;
-
 void* rtlAllocateHeapAddr = NULL;
 void* rtlFreeHeapAddr = NULL;
 
@@ -80,7 +68,6 @@ void* rtlFreeHeapAddr = NULL;
 DWORD g_tlsHeapAlloc = TLS_OUT_OF_INDEXES;
 DWORD g_tlsMalloc = TLS_OUT_OF_INDEXES;
 DWORD g_tlsRealloc = TLS_OUT_OF_INDEXES;
-DWORD g_tlsOperatorNew = TLS_OUT_OF_INDEXES;
 
 
 MH_STATUS initMinHook()
@@ -173,58 +160,6 @@ void* detourRealloc(void *memptr, size_t size)
     return newptr;
 }
 
-
-void* detourOperatorNew(size_t size)
-{   
-    if (TlsGetValue(g_tlsOperatorNew))
-    {
-        return  pOperatorNewOriginal(size);
-    }
-    
-    TlsSetValue(g_tlsOperatorNew, (LPVOID) 1);
-
-    void* memptr = pOperatorNewOriginal(size);
-    //std::bad_alloc is automatically handled
-
-    if(memptr != nullptr) // in case new is called with nothrow 
-    {
-        //tracker.trackAlloc(size, memptr);
-    }
-    //printf("operatorNew: %p size=%zu\n", memptr, size);
-    
-    TlsSetValue(g_tlsOperatorNew, (LPVOID) 0);
-    return memptr;
-}
-
-void detourOperatorDelete(void *ptr)
-{
-    pOperatorDeleteOriginal(ptr);
-    tracker.trackFree(ptr);
-}
-
-void* detourOperatorNewArray(size_t size)
-{   
-    if (TlsGetValue(g_tlsOperatorNew))
-    {
-        return  pOperatorNewArrayOriginal(size);
-    }
-
-    TlsSetValue(g_tlsOperatorNew, (LPVOID) 1);
-
-    void* memptr = pOperatorNewArrayOriginal(size);
-    //std::bad_alloc is automatically handled
-
-    //tracker.trackAlloc(size, memptr);
-
-    TlsSetValue(g_tlsOperatorNew, (LPVOID) 0);
-    return memptr;
-}
-
-void detourOperatorDeleteArray(void *ptr)
-{
-    pOperatorDeleteArrayOriginal(ptr);
-    tracker.trackFree(ptr);
-}
 
 LPVOID detourHeapAlloc(HANDLE hHeap, DWORD dwFlags, SIZE_T dwBytes)
 {   
@@ -403,7 +338,6 @@ MH_STATUS hookEntry()
     return status;
 }
 
-
 MH_STATUS hookMalloc()
 {
     MH_STATUS status;
@@ -440,63 +374,6 @@ MH_STATUS hookRealloc()
         return status;
     }
 
-    return status;
-}
-
-
-MH_STATUS hookOperatorNew()
-{
-    MH_STATUS status;
-    //(void* (*)(std::size_t)) &operator new;
-
-    status = MH_EnableHook((void*)opNewAddr);
-    if (status != MH_OK)
-    {
-        return status;
-    }
-    return status;
-}
-
-MH_STATUS hookOperatorDelete()
-{
-    MH_STATUS status;
-
-    //(void*)(void (*)(void*)) &operator delete
-
-    status = MH_EnableHook((void*)opDeleteAddr);
-    if (status != MH_OK)
-    {
-        return status;
-    }
-    
-    return status;
-}
-
-MH_STATUS hookOperatorNewArray()
-{
-    MH_STATUS status;
-    //(void* (*)(std::size_t)) &operator new[]
-
-    status = MH_EnableHook((void*)opNewArrayAddr);
-    if (status != MH_OK)
-    {
-        return status;
-    }
-    return status;
-}
-
-MH_STATUS hookOperatorDeleteArray()
-{
-    MH_STATUS status;
-
-    //(void*)(void (*)(void*)) &operator delete[]
-
-    status = MH_EnableHook((void*)opDeleteArrayAddr);
-    if (status != MH_OK)
-    {
-        return status;
-    }
-    
     return status;
 }
 
@@ -601,7 +478,6 @@ MH_STATUS hookExitProcess()
     
     return status;
 }
-
 
 MH_STATUS createHooks()
 {   
@@ -726,22 +602,6 @@ MH_STATUS createHooks()
     }
 */
 
-/*
-    if (hVCRuntime == NULL)
-    {
-        opNewAddr = (void*) (void* (*)(std::size_t)) &operator new;
-        opDeleteAddr = (void*)(void (*)(void*)) &operator delete;
-        opNewArrayAddr = (void*) (void* (*)(std::size_t)) &operator new[];
-        opDeleteArrayAddr = (void*)(void (*)(void*)) &operator delete[];
-    }
-    else {
-        opNewAddr = (void*) GetProcAddress(hVCRuntime, "??2@YAPEAX_K@Z");
-        opDeleteAddr = (void*) GetProcAddress(hVCRuntime, "??3@YAXPEAX@Z");
-        opNewArrayAddr = (void*) GetProcAddress(hVCRuntime, "??_U@YAPEAX_K@Z");
-        opDeleteArrayAddr = (void*) GetProcAddress(hVCRuntime, "??_V@YAXPEAX@Z");
-    }
-*/
-
     //malloc
     status = MH_CreateHook((void*)mallocAddr, (void*) &detourMalloc, reinterpret_cast<LPVOID*>(&pMallocOriginal));
     if(status != MH_OK)
@@ -762,34 +622,7 @@ MH_STATUS createHooks()
     {
         return status;
     }
-/*
-    //operator new
-    status = MH_CreateHook((void*)opNewAddr, (void*) &detourOperatorNew, reinterpret_cast<LPVOID*>(&pOperatorNewOriginal));
-    if(status != MH_OK)
-    {
-        return status;
-    }
-    //operator delete
-    status = MH_CreateHook((void*)opDeleteAddr, (void*) &detourOperatorDelete, reinterpret_cast<LPVOID*>(&pOperatorDeleteOriginal));
 
-    if(status != MH_OK)
-    {
-        return status;
-    }
-    //operator new[]
-    status = MH_CreateHook((void*)opNewArrayAddr, (void*) &detourOperatorNewArray, reinterpret_cast<LPVOID*>(&pOperatorNewArrayOriginal));
-    if(status != MH_OK)
-    {
-        return status;
-    }
-    //operator delete[]
-    status = MH_CreateHook((void*)opDeleteArrayAddr, (void*) &detourOperatorDeleteArray, reinterpret_cast<LPVOID*>(&pOperatorDeleteArrayOriginal));
-
-    if(status != MH_OK)
-    {
-        return status;
-    }
-*/
     //heapalloc
     
     status = MH_CreateHook((void*)heapAllocAddr, (void*) &detourHeapAlloc, reinterpret_cast<LPVOID*>(&pHeapAllocOriginal));
@@ -884,26 +717,6 @@ MH_STATUS enableHooks()
     status = hookExitProcess();
     if(status != MH_OK) return status;
 
-/*  
-
-    status = hookOperatorNew();
-    if(status != MH_OK) return status;
-
-    status = hookOperatorDelete();
-    if(status != MH_OK) return status;
-
-    status = hookOperatorNewArray();
-    if(status != MH_OK) return status;
-    status = hookOperatorDeleteArray();
-    if(status != MH_OK) return status;
-
-    //status = hookRtlAllocateHeap();
-    if(status != MH_OK) return status;
-
-    //status = hookRtlFreeHeap();
-    if(status != MH_OK) return status;
-*/
-
     return status;
 }
 
@@ -929,18 +742,6 @@ MH_STATUS disableHooks()
     status = MH_DisableHook((void*)heapReAllocAddr);
     if(status != MH_OK) return status;
 /*
-    status = MH_DisableHook((void*)opNewAddr);
-    if(status != MH_OK) return status;
-
-    status = MH_DisableHook((void*)opDeleteAddr);
-    if(status != MH_OK) return status;
-
-    status = MH_DisableHook((void*)opNewArrayAddr);
-    if(status != MH_OK) return status;
-
-    status = MH_DisableHook((void*)opDeleteArrayAddr);
-    if(status != MH_OK) return status;
-
     status = MH_DisableHook((void*)rtlAllocateHeapAddr);
     if(status != MH_OK) return status;
     
@@ -984,18 +785,6 @@ MH_STATUS removeHooks()
     status = MH_RemoveHook((void*)reallocAddr);
     if(status != MH_OK) return status;
 /*
-    status = MH_RemoveHook((void*)opNewAddr);
-    if(status != MH_OK) return status;
-
-    status = MH_RemoveHook((void*)opDeleteAddr);
-    if(status != MH_OK) return status;
-
-    status = MH_RemoveHook((void*)opNewArrayAddr);
-    if(status != MH_OK) return status;
-
-    status = MH_RemoveHook((void*)opDeleteArrayAddr);
-    if(status != MH_OK) return status;
-
     status = MH_RemoveHook((void*)rtlAllocateHeapAddr);
     if(status != MH_OK) return status;
 

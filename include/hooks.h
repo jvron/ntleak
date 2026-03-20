@@ -14,17 +14,6 @@ extern DWORD g_tlsOperatorNew;
 MH_STATUS initMinHook();
 MH_STATUS uninitMinHook();
 
-void detourEntry(void);
-
-void* detourMalloc(size_t size);
-void detourFree(void* ptr);
-
-void* detourOperatorNew(size_t size);
-void detourOperatorDelete(void* ptr);
-
-void* detourOperatorNewArray(size_t size);
-void detourOperatorDeleteArray(void* ptr);
-
 MH_STATUS hookEntry();
 
 MH_STATUS hookHeapAlloc();
@@ -38,12 +27,6 @@ MH_STATUS hookVirtualFree();
 
 MH_STATUS hookMalloc();
 MH_STATUS hookFree();
-
-MH_STATUS hookOperatorNew();
-MH_STATUS hookOperatorDelete();
-
-MH_STATUS hookOperatorNewArray();
-MH_STATUS hookOperatorDeleteArray();
 
 MH_STATUS createHooks();
 MH_STATUS enableHooks();

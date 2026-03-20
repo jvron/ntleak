@@ -295,20 +295,16 @@ BOOLEAN detourRtlFreeHeap(PVOID HeapHandle, ULONG Flags, PVOID HeapBase)
 VOID detourExitProcess(UINT uExitCode)
 {   
     tracker.trackingEnabled = false;
-    tracker.trackFreeEnabled = true;
-
     tracker.trackFreeEnabled = false;
+    
     MH_STATUS status;
- 
-    MH_DisableHook(MH_ALL_HOOKS);
-    MH_RemoveHook(MH_ALL_HOOKS);
-
+    status = disableHooks();
+    status = removeHooks();
     status = uninitMinHook();
 
     tracker.resolveSymbols();
     tracker.report();
     tracker.shutdown();
-
 
     //safe to call ExitProcess directly as hooks are removed
     ExitProcess(uExitCode);
